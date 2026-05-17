@@ -7,13 +7,18 @@ wit_bindgen::generate!({
     generate_all,
 });
 
+const BUCKET: &str = "mycelium-events-journal";
+
 struct Component;
 
 impl exports::wasmcloud::messaging::handler::Guest for Component {
     fn handle_message(msg: wasmcloud::messaging::types::BrokerMessage) -> Result<(), String> {
-        let _ = msg;
-        // TODO: write msg.body to mycelium-events-journal KV
-        //       key = events/{subject}/{timestamp_nanos}
+        let body = msg.body;
+        let now = wasi::clocks::wall_clock::now();
+        let stamp = now.seconds * 1_000_000_000 + now.nanoseconds as u64;
+        let key = format!("events/{}/{stamp:020}", msg.subject);
+        let bucket = wasi::keyvalue::store::open(BUCKET).map_err(|e| format!("{e:?}"))?;
+        bucket.set(&key, &body).map_err(|e| format!("{e:?}"))?;
         Ok(())
     }
 }

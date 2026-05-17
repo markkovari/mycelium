@@ -22,3 +22,21 @@ interface agent-step {
         state:  task-state,
     ) -> result<string, domain-error>;
 }
+
+/// CRUD over per-agent configuration stored in the mycelium-agent-config KV bucket.
+/// Callers supply a fully populated agent-config; the registry persists it under key
+/// `agent/{id}`. Extension fields (custom endpoint, api-key) live in a KV-side
+/// wrapper and never leak into this WIT record.
+interface agent-registry {
+    use mycelium:types/types@0.1.0.{
+        agent-id,
+        agent-config,
+        domain-error,
+    };
+
+    create:    func(config: agent-config) -> result<agent-config, domain-error>;
+    get:       func(id: agent-id)          -> result<agent-config, domain-error>;
+    update:    func(config: agent-config) -> result<agent-config, domain-error>;
+    delete:    func(id: agent-id)          -> result<_, domain-error>;
+    list-agents: func()                     -> result<list<agent-config>, domain-error>;
+}

@@ -1,23 +1,19 @@
 package mycelium:telegram-gateway@0.1.0;
 
+// HTTP webhook receiver. Supports `/agent create` admin commands via in-workload
+// WIT call to agent-registry. Outbound replies, pairing, and message fan-out belong
+// to sibling components (telegram-out, session-bridge).
+// v2 host limitation: cannot import wasmcloud:messaging/consumer.
 world telegram-gateway {
-    /// Receive Telegram webhook POST
     export wasi:http/incoming-handler@0.2.2;
-    /// Receive outbound reply requests from NATS
-    export wasmcloud:messaging/handler@0.2.0;
 
-    import wasi:http/outgoing-handler@0.2.2;
     import wasi:http/types@0.2.2;
     import wasi:io/streams@0.2.2;
     import wasi:io/poll@0.2.2;
-    import wasi:keyvalue/store@0.2.0-draft;
-    import wasi:config/runtime@0.2.0-draft;
+    import wasi:config/store@0.2.0-rc.1;
     import wasi:logging/logging@0.1.0-draft;
     import wasi:clocks/wall-clock@0.2.2;
-    import wasmcloud:messaging/producer@0.2.0;
 
     import mycelium:types/types@0.1.0;
-    import mycelium:channel/inbound@0.1.0;
-    import mycelium:channel/outbound@0.1.0;
-    import mycelium:pairing/pairing@0.1.0;
+    import mycelium:agent/agent-registry@0.1.0;
 }

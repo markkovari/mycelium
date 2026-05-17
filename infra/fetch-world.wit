@@ -11,6 +11,5 @@ world scratch {
     import wasi:random/random@0.2.2;
     import wasi:keyvalue/store@0.2.0-draft;
     import wasi:keyvalue/atomics@0.2.0-draft;
-    import wasi:config/runtime@0.2.0-draft;
     import wasi:logging/logging@0.1.0-draft;
 }

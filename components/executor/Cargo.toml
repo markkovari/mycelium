@@ -23,7 +23,7 @@ world = "executor"
 
 [package.metadata.component.target.dependencies]
 "wasi:keyvalue" = { path = "wit/deps/wasi-keyvalue-0.2.0-draft" }
-"wasi:config" = { path = "wit/deps/wasi-config-0.2.0-draft" }
+"wasi:config" = { path = "wit/deps/wasi-config-0.2.0-rc.1" }
 "wasi:logging" = { path = "wit/deps/wasi-logging-0.1.0-draft" }
 "wasi:clocks" = { path = "wit/deps/wasi-clocks-0.2.2" }
 "wasi:random" = { path = "wit/deps/wasi-random-0.2.2" }

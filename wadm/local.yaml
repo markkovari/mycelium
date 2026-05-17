@@ -6,7 +6,7 @@ metadata:
     description: |
       Local dev. Ollama at localhost:11434. NATS at localhost:4222 (embedded).
       HTTP on :8080. No TLS. All instances = 1.
-    version: v0.1.0
+    version: v0.3.0
 spec:
   components:
 
@@ -15,7 +15,7 @@ spec:
     - name: gateway
       type: component
       properties:
-        image: file://./target/wasm32-wasip2/release/gateway.wasm
+        image: file:///Users/markkovari/DEV/markkovari/mycelium/target/wasm32-wasip2/release/gateway.wasm
       traits:
         - type: spreadscaler
           properties:
@@ -29,7 +29,7 @@ spec:
     - name: executor
       type: component
       properties:
-        image: file://./target/wasm32-wasip2/release/executor.wasm
+        image: file:///Users/markkovari/DEV/markkovari/mycelium/target/wasm32-wasip2/release/executor.wasm
       traits:
         - type: spreadscaler
           properties:
@@ -43,7 +43,7 @@ spec:
     - name: agent
       type: component
       properties:
-        image: file://./target/wasm32-wasip2/release/agent.wasm
+        image: file:///Users/markkovari/DEV/markkovari/mycelium/target/wasm32-wasip2/release/agent.wasm
       traits:
         - type: spreadscaler
           properties:
@@ -52,7 +52,7 @@ spec:
     - name: tool-runner
       type: component
       properties:
-        image: file://./target/wasm32-wasip2/release/tool_runner.wasm
+        image: file:///Users/markkovari/DEV/markkovari/mycelium/target/wasm32-wasip2/release/tool_runner.wasm
       traits:
         - type: spreadscaler
           properties:
@@ -61,7 +61,7 @@ spec:
     - name: memory-store
       type: component
       properties:
-        image: file://./target/wasm32-wasip2/release/memory_store.wasm
+        image: file:///Users/markkovari/DEV/markkovari/mycelium/target/wasm32-wasip2/release/memory_store.wasm
       traits:
         - type: spreadscaler
           properties:
@@ -75,7 +75,7 @@ spec:
     - name: conversation-store
       type: component
       properties:
-        image: file://./target/wasm32-wasip2/release/conversation_store.wasm
+        image: file:///Users/markkovari/DEV/markkovari/mycelium/target/wasm32-wasip2/release/conversation_store.wasm
       traits:
         - type: spreadscaler
           properties:
@@ -89,7 +89,7 @@ spec:
     - name: router
       type: component
       properties:
-        image: file://./target/wasm32-wasip2/release/router.wasm
+        image: file:///Users/markkovari/DEV/markkovari/mycelium/target/wasm32-wasip2/release/router.wasm
       traits:
         - type: spreadscaler
           properties:
@@ -103,7 +103,7 @@ spec:
     - name: event-logger
       type: component
       properties:
-        image: file://./target/wasm32-wasip2/release/event_logger.wasm
+        image: file:///Users/markkovari/DEV/markkovari/mycelium/target/wasm32-wasip2/release/event_logger.wasm
       traits:
         - type: spreadscaler
           properties:
@@ -117,7 +117,7 @@ spec:
     - name: telegram-gateway
       type: component
       properties:
-        image: file://./target/wasm32-wasip2/release/telegram_gateway.wasm
+        image: file:///Users/markkovari/DEV/markkovari/mycelium/target/wasm32-wasip2/release/telegram_gateway.wasm
       traits:
         - type: spreadscaler
           properties:
@@ -131,7 +131,7 @@ spec:
     - name: session-bridge
       type: component
       properties:
-        image: file://./target/wasm32-wasip2/release/session_bridge.wasm
+        image: file:///Users/markkovari/DEV/markkovari/mycelium/target/wasm32-wasip2/release/session_bridge.wasm
       traits:
         - type: spreadscaler
           properties:

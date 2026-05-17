@@ -19,7 +19,7 @@ create_stream() {
         --max-age="$max_age" \
         --replicas=1 \
         --defaults \
-        --no-headers-only
+       
     echo "  created stream $name"
 }
 

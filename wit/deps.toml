@@ -8,4 +8,5 @@
 "wasi:io"             = "0.2.2"
 "wasi:clocks"         = "0.2.2"
 "wasi:random"         = "0.2.2"
-"wasi:config"         = "0.2.0-draft"
+# wasi:config is hand-maintained at wit/deps/wasi-config-0.2.0-rc.1 (interface `store`).
+# The v2 host expects the rc.1/store variant, not the legacy 0.2.0-draft/runtime registry version.

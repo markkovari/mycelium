@@ -1,0 +1,12 @@
+package mycelium:task-publisher@0.1.0;
+
+// Tiny shim: receives a Task via WIT, publishes it to NATS subject mycelium.task.submit.
+// Lives next to HTTP-exporting components (gateway) so they can fan out tasks without
+// importing wasmcloud:messaging/consumer themselves — wash host v2 forbids that combo.
+world task-publisher {
+    export mycelium:task/task-submit@0.1.0;
+
+    import wasmcloud:messaging/consumer@0.2.0;
+    import wasi:logging/logging@0.1.0-draft;
+    import mycelium:types/types@0.1.0;
+}

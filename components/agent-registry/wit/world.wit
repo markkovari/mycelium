@@ -1,0 +1,14 @@
+package mycelium:agent-registry@0.1.0;
+
+// Per-agent configuration store backed by mycelium-agent-config KV bucket.
+// Pure WIT-callable component (no NATS handler export, no consumer import).
+// Safe to compose inside any workload — including HTTP-exporting ones.
+world agent-registry {
+    export mycelium:agent/agent-registry@0.1.0;
+
+    import wasi:keyvalue/store@0.2.0-draft;
+    import wasi:logging/logging@0.1.0-draft;
+    import wasi:clocks/wall-clock@0.2.2;
+
+    import mycelium:types/types@0.1.0;
+}
