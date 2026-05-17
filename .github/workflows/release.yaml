@@ -1,0 +1,85 @@
+name: Release WASM Components
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  ORG: markkovari
+  PROJECT: mycelium
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      matrix:
+        component:
+          - gateway
+          - executor
+          - agent
+          - tool-runner
+          - memory-store
+          - conversation-store
+          - router
+          - event-logger
+          - telegram-gateway
+          - session-bridge
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasi,wasm32-unknown-unknown
+
+      - name: Install wash
+        uses: wasmcloud/common-actions/install-wash@v3
+
+      - name: Install wkg
+        run: cargo install wkg
+
+      - name: Install just
+        uses: extractions/setup-just@v2
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version
+        id: extract_version
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/}
+          else
+            VERSION="latest"
+          fi
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Init WIT deps
+        run: just init-wit-deps
+
+      - name: Build Component
+        run: |
+          cd components/${{ matrix.component }}
+          wash build
+
+      - name: Push Component to GHCR
+        run: |
+          cd components/${{ matrix.component }}
+          IMAGE_NAME=${{ env.REGISTRY }}/${{ env.ORG }}/${{ env.PROJECT }}/${{ matrix.component }}:${{ env.VERSION }}
+          # Look for the built wasm file (it's usually built into build/ dir by wash build)
+          WASM_FILE=$(ls build/*_s.wasm | head -n 1)
+          echo "Pushing $WASM_FILE to $IMAGE_NAME"
+          wash push $IMAGE_NAME $WASM_FILE --annotation org.opencontainers.image.source=https://github.com/${{ github.repository }}
