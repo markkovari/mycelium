@@ -1,5 +1,5 @@
 // Tool execution sandbox.
-// Subscribes to lc.tool.call; dispatches to registered tool providers; publishes result to lc.tool.result.
+// Subscribes to mycelium.tool.call; dispatches to registered tool providers; publishes result to mycelium.tool.result.
 wit_bindgen::generate!({
     path: "wit",
     world: "tool-runner",
@@ -16,7 +16,7 @@ impl exports::wasmcloud::messaging::handler::Guest for Component {
         // TODO: deserialize ToolCallRequest
         //       look up tool in tool-registry
         //       invoke tool-provider::invoke
-        //       publish ToolCallResult to lc.tool.result
+        //       publish ToolCallResult to mycelium.tool.result
         Ok(())
     }
 }

@@ -1,5 +1,5 @@
 // Durable event journal.
-// Subscribes to lc.event.> via a JetStream durable consumer.
+// Subscribes to mycelium.event.> via a JetStream durable consumer.
 // Writes every event to mycelium-events-journal KV bucket for long-term audit.
 wit_bindgen::generate!({
     path: "wit",

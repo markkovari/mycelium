@@ -1,7 +1,7 @@
 // Telegram bot webhook receiver + reply sender.
 //
-// HTTP handler: POST /webhook → parse Telegram Update → normalise → publish lc.channel.in
-// Messaging handler: subscribe lc.channel.telegram.out.{chat_id} → call Telegram Bot API
+// HTTP handler: POST /webhook → parse Telegram Update → normalise → publish mycelium.channel.in
+// Messaging handler: subscribe mycelium.channel.telegram.out.{chat_id} → call Telegram Bot API
 //
 // Config keys (via wasi:config/store):
 //   telegram.bot_token      — BotFather token
@@ -24,7 +24,7 @@ impl exports::wasi::http::incoming_handler::Guest for Component {
         // 1. validate X-Telegram-Bot-Api-Secret-Token header
         // 2. read body, parse as Telegram Update JSON
         // 3. if update.message.text starts with "/pair " → call pairing::complete
-        // 4. else → call channel::inbound::normalize, publish to lc.channel.in
+        // 4. else → call channel::inbound::normalize, publish to mycelium.channel.in
         // 5. respond 200 OK immediately (Telegram requires fast ACK)
     }
 }

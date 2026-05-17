@@ -1,5 +1,5 @@
 // HTTP ingress component.
-// Receives REST calls, publishes to lc.task.submit and lc.channel.in via wasmcloud:messaging.
+// Receives REST calls, publishes to mycelium.task.submit and mycelium.channel.in via wasmcloud:messaging.
 // Run `just init-wit-deps` then `wash build` to compile.
 wit_bindgen::generate!({
     path: "wit",
@@ -15,7 +15,7 @@ impl exports::wasi::http::incoming_handler::Guest for Component {
         response_out: wasi::http::types::ResponseOutparam,
     ) {
         let _ = (request, response_out);
-        // TODO: route POST /conversations → lc.task.submit
+        // TODO: route POST /conversations → mycelium.task.submit
         //       route GET  /conversations/:id/messages → conversation-store
         //       route POST /tasks → executor orchestrator
     }

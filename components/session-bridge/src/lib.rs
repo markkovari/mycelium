@@ -2,11 +2,11 @@
 //
 // Exports mycelium:pairing/pairing.
 // Also exposes request-reply over NATS so mycelium-cli (native binary) can call it:
-//   lc.pair.request         → request-code
-//   lc.pair.complete        → complete
-//   lc.pair.get-by-session  → get-by-session
-//   lc.pair.get-by-chat     → get-by-chat
-//   lc.pair.unpair          → unpair
+//   mycelium.pair.request         → request-code
+//   mycelium.pair.complete        → complete
+//   mycelium.pair.get-by-session  → get-by-session
+//   mycelium.pair.get-by-chat     → get-by-chat
+//   mycelium.pair.unpair          → unpair
 //
 // KV bucket: mycelium-channel-sessions
 //   pair/code/{CODE}         → PendingPair JSON (TTL 5 min)
@@ -81,7 +81,7 @@ impl exports::wasmcloud::messaging::handler::Guest for Component {
         msg: wasmcloud::messaging::types::BrokerMessage,
     ) -> Result<(), String> {
         let _ = msg;
-        // TODO: route lc.pair.* subjects to the appropriate pairing:: methods above
+        // TODO: route mycelium.pair.* subjects to the appropriate pairing:: methods above
         //       respond via msg.reply_to for request-reply pattern
         Ok(())
     }

@@ -265,7 +265,7 @@ spec:
               - name: nats-local
                 properties:
                   cluster_uris: "nats://127.0.0.1:4222"
-                  subscriptions: "lc.task.submit,lc.step.result"
+                  subscriptions: "mycelium.task.submit,mycelium.step.result"
         - type: link
           properties:
             target: agent
@@ -276,7 +276,7 @@ spec:
               - name: nats-local
                 properties:
                   cluster_uris: "nats://127.0.0.1:4222"
-                  subscriptions: "lc.task.step.agent,lc.tool.result"
+                  subscriptions: "mycelium.task.step.agent,mycelium.tool.result"
         - type: link
           properties:
             target: tool-runner
@@ -287,7 +287,7 @@ spec:
               - name: nats-local
                 properties:
                   cluster_uris: "nats://127.0.0.1:4222"
-                  subscriptions: "lc.tool.call"
+                  subscriptions: "mycelium.tool.call"
         - type: link
           properties:
             target: memory-store
@@ -298,7 +298,7 @@ spec:
               - name: nats-local
                 properties:
                   cluster_uris: "nats://127.0.0.1:4222"
-                  subscriptions: "lc.memory.>"
+                  subscriptions: "mycelium.memory.>"
         - type: link
           properties:
             target: conversation-store
@@ -309,7 +309,7 @@ spec:
               - name: nats-local
                 properties:
                   cluster_uris: "nats://127.0.0.1:4222"
-                  subscriptions: "lc.conversation.>"
+                  subscriptions: "mycelium.conversation.>"
         - type: link
           properties:
             target: router
@@ -320,7 +320,7 @@ spec:
               - name: nats-local
                 properties:
                   cluster_uris: "nats://127.0.0.1:4222"
-                  subscriptions: "lc.event.>"
+                  subscriptions: "mycelium.event.>"
         - type: link
           properties:
             target: event-logger
@@ -331,7 +331,7 @@ spec:
               - name: nats-local
                 properties:
                   cluster_uris: "nats://127.0.0.1:4222"
-                  subscriptions: "lc.event.>"
+                  subscriptions: "mycelium.event.>"
         - type: link
           properties:
             target: telegram-gateway
@@ -342,7 +342,7 @@ spec:
               - name: nats-local
                 properties:
                   cluster_uris: "nats://127.0.0.1:4222"
-                  subscriptions: "lc.channel.telegram.out.>"
+                  subscriptions: "mycelium.channel.telegram.out.>"
         - type: link
           properties:
             target: session-bridge
@@ -353,4 +353,4 @@ spec:
               - name: nats-local
                 properties:
                   cluster_uris: "nats://127.0.0.1:4222"
-                  subscriptions: "lc.pair.>"
+                  subscriptions: "mycelium.pair.>"

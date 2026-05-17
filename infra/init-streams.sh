@@ -34,12 +34,12 @@ create_kv() {
 }
 
 echo "==> Creating JetStream streams"
-create_stream LC_TASKS          "lc.task.>"         file   168h
-create_stream LC_TOOL_CALLS     "lc.tool.>"         memory 1h
-create_stream LC_CONVERSATIONS  "lc.conversation.>" file   720h
-create_stream LC_EVENTS         "lc.event.>"        file   2160h
-create_stream LC_CHANNELS       "lc.channel.>"      file   24h
-create_stream LC_PAIRING        "lc.pair.>"         memory 10m
+create_stream MYCELIUM_TASKS          "mycelium.task.>"         file   168h
+create_stream MYCELIUM_TOOL_CALLS     "mycelium.tool.>"         memory 1h
+create_stream MYCELIUM_CONVERSATIONS  "mycelium.conversation.>" file   720h
+create_stream MYCELIUM_EVENTS         "mycelium.event.>"        file   2160h
+create_stream MYCELIUM_CHANNELS       "mycelium.channel.>"      file   24h
+create_stream MYCELIUM_PAIRING        "mycelium.pair.>"         memory 10m
 
 echo ""
 echo "==> Creating KV buckets"

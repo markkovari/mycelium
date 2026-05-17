@@ -1,6 +1,6 @@
 // Agent memory (KV-backed).
 // Exports mycelium:memory/memory — called directly by executor and agent components.
-// Also subscribes to lc.memory.> for request-reply access from native clients.
+// Also subscribes to mycelium.memory.> for request-reply access from native clients.
 // KV bucket: mycelium-memory  key format: memory/{agent_id}/{key}
 wit_bindgen::generate!({
     path: "wit",
@@ -59,7 +59,7 @@ impl exports::wasmcloud::messaging::handler::Guest for Component {
         msg: wasmcloud::messaging::types::BrokerMessage,
     ) -> Result<(), String> {
         let _ = msg;
-        // TODO: handle lc.memory.> request-reply for native clients
+        // TODO: handle mycelium.memory.> request-reply for native clients
         Ok(())
     }
 }

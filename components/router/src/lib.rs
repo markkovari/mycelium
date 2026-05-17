@@ -1,5 +1,5 @@
 // Event fan-out router.
-// Subscribes to lc.event.> and fans messages out to registered target subjects.
+// Subscribes to mycelium.event.> and fans messages out to registered target subjects.
 // Rules stored in mycelium-router-rules KV bucket.
 wit_bindgen::generate!({
     path: "wit",

@@ -18,10 +18,10 @@ use uuid::Uuid;
 #[derive(Parser, Debug)]
 #[command(name = "lc", about = "mycelium interactive agent REPL")]
 struct Args {
-    #[arg(long, default_value = "nats://127.0.0.1:4222", env = "LC_NATS_URL")]
+    #[arg(long, default_value = "nats://127.0.0.1:4222", env = "MYCELIUM_NATS_URL")]
     nats_url: String,
 
-    #[arg(long, default_value = "default", env = "LC_AGENT_ID")]
+    #[arg(long, default_value = "default", env = "MYCELIUM_AGENT_ID")]
     agent_id: String,
 
     /// Resume an existing session (skips pairing prompt)
@@ -59,7 +59,7 @@ async fn main() -> Result<()> {
         .with_context(|| format!("failed to connect to NATS at {}", args.nats_url))?;
 
     // Subscribe to replies for this session before doing anything else
-    let reply_subject = format!("lc.channel.cli.out.{}", session_id);
+    let reply_subject = format!("mycelium.channel.cli.out.{}", session_id);
     let mut reply_sub = client
         .subscribe(reply_subject.clone())
         .await
@@ -133,7 +133,7 @@ async fn main() -> Result<()> {
         if text == "/unpair" {
             if let Some(ref p) = pair_info {
                 let _ = client
-                    .publish("lc.pair.unpair", p.session_id.as_bytes().into())
+                    .publish("mycelium.pair.unpair", p.session_id.as_bytes().into())
                     .await;
                 println!("Unpaired.");
             }
@@ -152,7 +152,7 @@ async fn main() -> Result<()> {
 
         let payload = serde_json::to_vec(&msg).unwrap_or_default();
         if let Err(e) = client
-            .publish("lc.channel.in", payload.into())
+            .publish("mycelium.channel.in", payload.into())
             .await
         {
             eprintln!("publish error: {e}");
@@ -181,7 +181,7 @@ async fn request_and_await_pair(
 
     let resp = tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        client.request("lc.pair.request", req.to_string().into()),
+        client.request("mycelium.pair.request", req.to_string().into()),
     )
     .await
     .context("pair request timed out")??;
@@ -212,7 +212,7 @@ async fn request_and_await_pair(
 
         let poll_resp = tokio::time::timeout(
             std::time::Duration::from_secs(3),
-            client.request("lc.pair.get-by-session", session_id.as_bytes().into()),
+            client.request("mycelium.pair.get-by-session", session_id.as_bytes().into()),
         )
         .await;
 

@@ -1,5 +1,5 @@
 // Orchestration engine.
-// Subscribes to lc.task.submit; drives the agent step loop by publishing to lc.task.step.agent.
+// Subscribes to mycelium.task.submit; drives the agent step loop by publishing to mycelium.task.step.agent.
 // Persists TaskState to mycelium-task-state KV bucket after every transition.
 wit_bindgen::generate!({
     path: "wit",
@@ -16,7 +16,7 @@ impl exports::wasmcloud::messaging::handler::Guest for Component {
         let _ = msg;
         // TODO: deserialize Task from msg.body
         //       write initial TaskState → KV
-        //       publish step request to lc.task.step.agent
+        //       publish step request to mycelium.task.step.agent
         Ok(())
     }
 }

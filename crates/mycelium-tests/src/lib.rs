@@ -16,7 +16,7 @@ mod integration {
         let client = nats().await;
         // Publish a ping and verify no error
         client
-            .publish("lc.test.ping", "ping".into())
+            .publish("mycelium.test.ping", "ping".into())
             .await
             .expect("publish failed");
     }
@@ -30,7 +30,7 @@ mod integration {
             "expires_in": 60
         });
         let resp = client
-            .request("lc.pair.request", req.to_string().into())
+            .request("mycelium.pair.request", req.to_string().into())
             .await
             .expect("request-reply failed");
 

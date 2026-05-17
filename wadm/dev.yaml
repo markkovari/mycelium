@@ -200,7 +200,7 @@ spec:
               - name: nats-dev
                 properties:
                   cluster_uris: "nats://dev-nats.internal:4222"
-                  subscriptions: "lc.task.submit,lc.step.result"
+                  subscriptions: "mycelium.task.submit,mycelium.step.result"
         - type: link
           properties:
             target: agent
@@ -211,7 +211,7 @@ spec:
               - name: nats-dev
                 properties:
                   cluster_uris: "nats://dev-nats.internal:4222"
-                  subscriptions: "lc.task.step.agent,lc.tool.result"
+                  subscriptions: "mycelium.task.step.agent,mycelium.tool.result"
         - type: link
           properties:
             target: session-bridge
@@ -222,7 +222,7 @@ spec:
               - name: nats-dev
                 properties:
                   cluster_uris: "nats://dev-nats.internal:4222"
-                  subscriptions: "lc.pair.>"
+                  subscriptions: "mycelium.pair.>"
         - type: link
           properties:
             target: telegram-gateway
@@ -233,4 +233,4 @@ spec:
               - name: nats-dev
                 properties:
                   cluster_uris: "nats://dev-nats.internal:4222"
-                  subscriptions: "lc.channel.telegram.out.>"
+                  subscriptions: "mycelium.channel.telegram.out.>"
