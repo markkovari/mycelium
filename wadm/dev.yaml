@@ -53,6 +53,11 @@ spec:
         - type: spreadscaler
           properties:
             instances: 2
+        - type: config
+          properties:
+            name: memory-store-kv-config
+            properties:
+              bucket: mycelium-memory
 
     - name: conversation-store
       type: component
@@ -62,6 +67,11 @@ spec:
         - type: spreadscaler
           properties:
             instances: 2
+        - type: config
+          properties:
+            name: conversation-store-kv-config
+            properties:
+              bucket: mycelium-conversations
 
     - name: router
       type: component
@@ -98,6 +108,11 @@ spec:
         - type: spreadscaler
           properties:
             instances: 2
+        - type: config
+          properties:
+            name: session-bridge-kv-config
+            properties:
+              bucket: mycelium-channel-sessions
 
     - name: httpserver
       type: capability

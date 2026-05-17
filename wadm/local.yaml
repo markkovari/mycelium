@@ -20,6 +20,11 @@ spec:
         - type: spreadscaler
           properties:
             instances: 1
+        - type: config
+          properties:
+            name: gateway-kv-config
+            properties:
+              bucket: mycelium-conversations
 
     - name: executor
       type: component
@@ -29,6 +34,11 @@ spec:
         - type: spreadscaler
           properties:
             instances: 2
+        - type: config
+          properties:
+            name: executor-kv-config
+            properties:
+              bucket: mycelium-task-state
 
     - name: agent
       type: component
@@ -56,6 +66,11 @@ spec:
         - type: spreadscaler
           properties:
             instances: 1
+        - type: config
+          properties:
+            name: memory-store-kv-config
+            properties:
+              bucket: mycelium-memory
 
     - name: conversation-store
       type: component
@@ -65,6 +80,11 @@ spec:
         - type: spreadscaler
           properties:
             instances: 1
+        - type: config
+          properties:
+            name: conversation-store-kv-config
+            properties:
+              bucket: mycelium-conversations
 
     - name: router
       type: component
@@ -74,6 +94,11 @@ spec:
         - type: spreadscaler
           properties:
             instances: 1
+        - type: config
+          properties:
+            name: router-kv-config
+            properties:
+              bucket: mycelium-router-rules
 
     - name: event-logger
       type: component
@@ -83,6 +108,11 @@ spec:
         - type: spreadscaler
           properties:
             instances: 1
+        - type: config
+          properties:
+            name: event-logger-kv-config
+            properties:
+              bucket: mycelium-events-journal
 
     - name: telegram-gateway
       type: component
@@ -92,6 +122,11 @@ spec:
         - type: spreadscaler
           properties:
             instances: 1
+        - type: config
+          properties:
+            name: telegram-gateway-kv-config
+            properties:
+              bucket: mycelium-channel-sessions
 
     - name: session-bridge
       type: component
@@ -101,6 +136,11 @@ spec:
         - type: spreadscaler
           properties:
             instances: 1
+        - type: config
+          properties:
+            name: session-bridge-kv-config
+            properties:
+              bucket: mycelium-channel-sessions
 
     # ── Capability Providers ─────────────────────────────────────────────────
 
