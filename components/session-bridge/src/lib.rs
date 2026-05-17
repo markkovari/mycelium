@@ -22,8 +22,8 @@ struct Component;
 
 impl exports::mycelium::pairing::pairing::Guest for Component {
     fn request_code(
-        req: mycelium::pairing::pairing::PairRequest,
-    ) -> Result<mycelium::pairing::pairing::PairCode, mycelium::types::types::DomainError> {
+        req: exports::mycelium::pairing::pairing::PairRequest,
+    ) -> Result<exports::mycelium::pairing::pairing::PairCode, mycelium::types::types::DomainError> {
         let _ = req;
         // TODO: generate 5-char alphanumeric code via wasi:random
         //       store pair/code/{CODE} in KV with TTL
@@ -35,7 +35,7 @@ impl exports::mycelium::pairing::pairing::Guest for Component {
     fn complete(
         code: String,
         chat_id: String,
-    ) -> Result<mycelium::pairing::pairing::PairInfo, mycelium::types::types::DomainError> {
+    ) -> Result<exports::mycelium::pairing::pairing::PairInfo, mycelium::types::types::DomainError> {
         let _ = (code, chat_id);
         // TODO: look up pair/code/{code} in KV
         //       create conversation via conversation-store
@@ -48,7 +48,7 @@ impl exports::mycelium::pairing::pairing::Guest for Component {
 
     fn get_by_session(
         session_id: String,
-    ) -> Result<Option<mycelium::pairing::pairing::PairInfo>, mycelium::types::types::DomainError>
+    ) -> Result<Option<exports::mycelium::pairing::pairing::PairInfo>, mycelium::types::types::DomainError>
     {
         let _ = session_id;
         Ok(None)
@@ -56,7 +56,7 @@ impl exports::mycelium::pairing::pairing::Guest for Component {
 
     fn get_by_chat(
         chat_id: String,
-    ) -> Result<Option<mycelium::pairing::pairing::PairInfo>, mycelium::types::types::DomainError>
+    ) -> Result<Option<exports::mycelium::pairing::pairing::PairInfo>, mycelium::types::types::DomainError>
     {
         let _ = chat_id;
         Ok(None)

@@ -9,7 +9,7 @@ world agent {
     import wasi:io/streams@0.2.2;
     import wasi:io/poll@0.2.2;
     import wasi:keyvalue/store@0.2.0-draft;
-    import wasi:config/store@0.2.0-draft;
+    import wasi:config/runtime@0.2.0-draft;
     import wasi:logging/logging@0.1.0-draft;
     import wasi:clocks/wall-clock@0.2.2;
     import wasi:random/random@0.2.2;

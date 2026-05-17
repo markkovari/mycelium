@@ -88,24 +88,11 @@ fetch-wit-deps:
     tmpdir=$(mktemp -d)
     trap "rm -rf $tmpdir" EXIT
     mkdir -p "$tmpdir/deps"
-    # Pre-populate internal packages so wkg skips registry lookup for them
-    for wit_file in wit/types.wit wit/agent.wit wit/conversation.wit wit/tool.wit wit/memory.wit wit/executor.wit wit/router.wit wit/channel.wit wit/pairing.wit wit/cron.wit wit/batch.wit; do
-        pkg=$(head -1 "$wit_file" | sed 's/package //' | sed 's/;//')
-        name=$(echo "$pkg" | tr ':@.' '-')
-        mkdir -p "$tmpdir/deps/$name"
-        cp "$wit_file" "$tmpdir/deps/$name/"
-    done
     cp wit/deps.toml "$tmpdir/deps.toml"
-    cp components/gateway/wit/world.wit "$tmpdir/world.wit"
+    cp infra/fetch-world.wit "$tmpdir/world.wit"
     wkg wit fetch -d "$tmpdir"
     mkdir -p wit/deps
-    # Copy only externally-fetched deps (not our internal mycelium-* packages)
-    for d in "$tmpdir/deps/"*/; do
-        pkg_name=$(basename "$d")
-        if [[ "$pkg_name" != mycelium-* ]]; then
-            cp -r "$d" wit/deps/
-        fi
-    done
+    cp -r "$tmpdir/deps/". wit/deps/
     echo "Fetched external WIT deps into wit/deps/"
 
 # Seed each component's wit/deps/ from the workspace wit/ directory.
@@ -116,35 +103,20 @@ init-wit-deps: fetch-wit-deps
 
     echo "==> Seeding component wit/deps/ from workspace wit/"
 
-    # Internal mycelium packages to copy
-    declare -A pkg_dirs=(
-        ["mycelium-types-0.1.0"]="wit/types.wit"
-        ["mycelium-agent-0.1.0"]="wit/agent.wit"
-        ["mycelium-conversation-0.1.0"]="wit/conversation.wit"
-        ["mycelium-tool-0.1.0"]="wit/tool.wit"
-        ["mycelium-memory-0.1.0"]="wit/memory.wit"
-        ["mycelium-executor-0.1.0"]="wit/executor.wit"
-        ["mycelium-router-0.1.0"]="wit/router.wit"
-        ["mycelium-channel-0.1.0"]="wit/channel.wit"
-        ["mycelium-pairing-0.1.0"]="wit/pairing.wit"
-        ["mycelium-cron-0.1.0"]="wit/cron.wit"
-        ["mycelium-batch-0.1.0"]="wit/batch.wit"
-    )
-
     for comp in {{components}}; do
         dest="components/$comp/wit/deps"
         mkdir -p "$dest"
+        rm -f "$dest/deps.toml" "$dest/world.wit"
 
-        # Copy external deps
+        # Copy all fetched external deps
         if [ -d "wit/deps" ]; then
             cp -r wit/deps/. "$dest/"
         fi
 
-        # Copy internal packages
-        for pkg_dir in "${!pkg_dirs[@]}"; do
-            src="${pkg_dirs[$pkg_dir]}"
-            mkdir -p "$dest/$pkg_dir"
-            cp "$src" "$dest/$pkg_dir/"
+        # Copy internal mycelium packages
+        for pkg in types agent conversation tool memory executor router channel pairing cron batch; do
+            mkdir -p "$dest/mycelium-${pkg}-0.1.0"
+            cp "wit/${pkg}.wit" "$dest/mycelium-${pkg}-0.1.0/"
         done
 
         echo "  seeded components/$comp/wit/deps/"

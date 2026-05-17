@@ -13,6 +13,4 @@ world scratch {
     import wasi:keyvalue/atomics@0.2.0-draft;
     import wasi:config/runtime@0.2.0-draft;
     import wasi:logging/logging@0.1.0-draft;
-    import wasmcloud:messaging/producer@0.2.0;
-    import wasmcloud:messaging/handler@0.2.0;
 }

@@ -10,5 +10,5 @@ interface scheduler {
 
     register:   func(job: cron-job) -> result<string, string>;
     unregister: func(id: string)    -> result<_, string>;
-    list:       func()              -> list<cron-job>;
+    list-jobs:  func()              -> list<cron-job>;
 }

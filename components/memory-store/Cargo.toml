@@ -20,3 +20,12 @@ package = "mycelium:memory-store"
 [package.metadata.component.target]
 path  = "wit"
 world = "memory-store"
+
+[package.metadata.component.target.dependencies]
+"wasi:keyvalue" = { path = "wit/deps/wasi-keyvalue-0.2.0-draft" }
+"wasi:logging" = { path = "wit/deps/wasi-logging-0.1.0-draft" }
+"wasi:clocks" = { path = "wit/deps/wasi-clocks-0.2.2" }
+"wasmcloud:messaging" = { path = "wit/deps/wasmcloud-messaging-0.2.0" }
+"mycelium:types" = { path = "wit/deps/mycelium-types-0.1.0" }
+"wasi:io" = { path = "wit/deps/wasi-io-0.2.2" }
+"mycelium:memory" = { path = "wit/deps/mycelium-memory-0.1.0" }

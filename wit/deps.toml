@@ -9,4 +9,3 @@
 "wasi:clocks"         = "0.2.2"
 "wasi:random"         = "0.2.2"
 "wasi:config"         = "0.2.0-draft"
-"wasmcloud:messaging" = "0.2.0"

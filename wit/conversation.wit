@@ -17,7 +17,7 @@ interface conversations {
 
     get: func(id: conversation-id) -> result<conversation, domain-error>;
 
-    list: func(agent-id: agent-id) -> result<list<conversation>, domain-error>;
+    list-conversations: func(agent-id: agent-id) -> result<list<conversation>, domain-error>;
 
     delete: func(id: conversation-id) -> result<_, domain-error>;
 

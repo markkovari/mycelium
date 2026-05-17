@@ -5,6 +5,9 @@
 wit/deps/
 components/*/wit/deps/
 
+# Generated WIT bindings
+**/src/bindings.rs
+
 # wasmCloud build artifacts
 components/*/build/
 *.wasm

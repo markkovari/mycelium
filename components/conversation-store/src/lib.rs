@@ -31,7 +31,7 @@ impl exports::mycelium::conversation::conversations::Guest for Component {
         Err(mycelium::types::types::DomainError::NotFound(id.clone()))
     }
 
-    fn list(
+    fn list_conversations(
         agent_id: String,
     ) -> Result<Vec<mycelium::types::types::Conversation>, mycelium::types::types::DomainError>
     {
