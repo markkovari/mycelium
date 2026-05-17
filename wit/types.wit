@@ -1,0 +1,106 @@
+package mycelium:types@0.1.0;
+
+interface types {
+    type conversation-id = string;
+    type task-id         = string;
+    type agent-id        = string;
+    type tool-id         = string;
+    type step-id         = string;
+    type memory-key      = string;
+    /// ISO-8601 UTC timestamp
+    type timestamp       = string;
+
+    enum message-role {
+        system,
+        user,
+        assistant,
+        tool,
+    }
+
+    record message {
+        id:          string,
+        role:        message-role,
+        content:     string,
+        tool-use-id: option<string>,
+        created-at:  timestamp,
+    }
+
+    record conversation {
+        id:         conversation-id,
+        agent-id:   agent-id,
+        title:      option<string>,
+        created-at: timestamp,
+        updated-at: timestamp,
+    }
+
+    record task {
+        id:              task-id,
+        conversation-id: conversation-id,
+        agent-id:        agent-id,
+        input:           string,
+        created-at:      timestamp,
+    }
+
+    enum task-status {
+        pending,
+        running,
+        paused,
+        done,
+        failed,
+    }
+
+    record task-state {
+        task:    task,
+        status:  task-status,
+        steps:   list<step-record>,
+        output:  option<string>,
+        error:   option<string>,
+    }
+
+    enum step-kind {
+        llm-call,
+        tool-call,
+        memory-read,
+        memory-write,
+    }
+
+    record step-record {
+        id:          step-id,
+        task-id:     task-id,
+        kind:        step-kind,
+        input-json:  string,
+        output-json: option<string>,
+        started-at:  timestamp,
+        ended-at:    option<timestamp>,
+    }
+
+    record tool-call-request {
+        call-id:   string,
+        tool-id:   tool-id,
+        args-json: string,
+    }
+
+    record tool-call-result {
+        call-id:     string,
+        tool-id:     tool-id,
+        output-json: string,
+        is-error:    bool,
+    }
+
+    record agent-config {
+        id:            agent-id,
+        name:          string,
+        system-prompt: string,
+        model:         string,
+        tools:         list<tool-id>,
+        max-steps:     u32,
+    }
+
+    variant domain-error {
+        not-found(string),
+        validation(string),
+        conflict(string),
+        backend(string),
+        internal(string),
+    }
+}

@@ -1,0 +1,24 @@
+package mycelium:agent@0.1.0;
+
+interface agent-step {
+    use mycelium:types/types@0.1.0.{
+        task-state,
+        tool-call-request,
+        tool-call-result,
+        agent-config,
+        domain-error,
+    };
+
+    /// Execute one reasoning step. Returns updated state + any new tool calls.
+    run-step: func(
+        config:       agent-config,
+        state:        task-state,
+        tool-results: list<tool-call-result>,
+    ) -> result<tuple<task-state, list<tool-call-request>>, domain-error>;
+
+    /// Serialize task state into LLM message list (JSON array).
+    build-messages: func(
+        config: agent-config,
+        state:  task-state,
+    ) -> result<string, domain-error>;
+}

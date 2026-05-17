@@ -1,0 +1,20 @@
+# Dev config — set LC_API_KEY in CI/CD secrets.
+
+[agent]
+llm_api_url  = "https://api.anthropic.com/v1/messages"
+llm_model    = "claude-haiku-4-5-20251001"
+llm_api_key  = "${LC_API_KEY}"
+max_tokens   = 8192
+temperature  = "0.7"
+
+[nats]
+url              = "nats://dev-nats.internal:4222"
+jetstream_domain = "lc-dev"
+
+[telegram]
+bot_token      = "${LC_TELEGRAM_BOT_TOKEN}"
+webhook_secret = "${LC_TELEGRAM_WEBHOOK_SECRET}"
+webhook_url    = "https://dev.mycelium.example.com/webhook"
+
+[cli]
+session_prefix = "cli-dev"

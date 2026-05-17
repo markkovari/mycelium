@@ -1,0 +1,20 @@
+# Prod config — all secrets injected from vault at deploy time.
+
+[agent]
+llm_api_url  = "https://api.anthropic.com/v1/messages"
+llm_model    = "claude-sonnet-4-6"
+llm_api_key  = "${LC_API_KEY}"
+max_tokens   = 16384
+temperature  = "0.3"
+
+[nats]
+url              = "nats://prod-nats.internal:4222"
+jetstream_domain = "lc-prod"
+
+[telegram]
+bot_token      = "${LC_TELEGRAM_BOT_TOKEN}"
+webhook_secret = "${LC_TELEGRAM_WEBHOOK_SECRET}"
+webhook_url    = "https://mycelium.example.com/webhook"
+
+[cli]
+session_prefix = "cli"

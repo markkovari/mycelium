@@ -1,0 +1,356 @@
+apiVersion: core.oam.dev/v1beta1
+kind: Application
+metadata:
+  name: mycelium-local
+  annotations:
+    description: |
+      Local dev. Ollama at localhost:11434. NATS at localhost:4222 (embedded).
+      HTTP on :8080. No TLS. All instances = 1.
+    version: v0.1.0
+spec:
+  components:
+
+    # ── WASM Components ─────────────────────────────────────────────────────
+
+    - name: gateway
+      type: component
+      properties:
+        image: file://./components/gateway/build/gateway_s.wasm
+      traits:
+        - type: spreadscaler
+          properties:
+            instances: 1
+
+    - name: executor
+      type: component
+      properties:
+        image: file://./components/executor/build/executor_s.wasm
+      traits:
+        - type: spreadscaler
+          properties:
+            instances: 2
+
+    - name: agent
+      type: component
+      properties:
+        image: file://./components/agent/build/agent_s.wasm
+      traits:
+        - type: spreadscaler
+          properties:
+            instances: 4
+
+    - name: tool-runner
+      type: component
+      properties:
+        image: file://./components/tool-runner/build/tool_runner_s.wasm
+      traits:
+        - type: spreadscaler
+          properties:
+            instances: 2
+
+    - name: memory-store
+      type: component
+      properties:
+        image: file://./components/memory-store/build/memory_store_s.wasm
+      traits:
+        - type: spreadscaler
+          properties:
+            instances: 1
+
+    - name: conversation-store
+      type: component
+      properties:
+        image: file://./components/conversation-store/build/conversation_store_s.wasm
+      traits:
+        - type: spreadscaler
+          properties:
+            instances: 1
+
+    - name: router
+      type: component
+      properties:
+        image: file://./components/router/build/router_s.wasm
+      traits:
+        - type: spreadscaler
+          properties:
+            instances: 1
+
+    - name: event-logger
+      type: component
+      properties:
+        image: file://./components/event-logger/build/event_logger_s.wasm
+      traits:
+        - type: spreadscaler
+          properties:
+            instances: 1
+
+    - name: telegram-gateway
+      type: component
+      properties:
+        image: file://./components/telegram-gateway/build/telegram_gateway_s.wasm
+      traits:
+        - type: spreadscaler
+          properties:
+            instances: 1
+
+    - name: session-bridge
+      type: component
+      properties:
+        image: file://./components/session-bridge/build/session_bridge_s.wasm
+      traits:
+        - type: spreadscaler
+          properties:
+            instances: 1
+
+    # ── Capability Providers ─────────────────────────────────────────────────
+
+    - name: httpserver
+      type: capability
+      properties:
+        image: ghcr.io/wasmcloud/http-server:0.26.0
+      traits:
+        - type: link
+          properties:
+            target: gateway
+            namespace: wasi
+            package: http
+            interfaces: [incoming-handler]
+            source_config:
+              - name: gateway-http-config
+                properties:
+                  address: "0.0.0.0:8080"
+        - type: link
+          properties:
+            target: telegram-gateway
+            namespace: wasi
+            package: http
+            interfaces: [incoming-handler]
+            source_config:
+              - name: telegram-http-config
+                properties:
+                  address: "0.0.0.0:8081"
+
+    - name: http-client
+      type: capability
+      properties:
+        image: ghcr.io/wasmcloud/http-client:0.12.0
+      traits:
+        - type: link
+          properties:
+            target: agent
+            namespace: wasi
+            package: http
+            interfaces: [outgoing-handler]
+        - type: link
+          properties:
+            target: tool-runner
+            namespace: wasi
+            package: http
+            interfaces: [outgoing-handler]
+        - type: link
+          properties:
+            target: telegram-gateway
+            namespace: wasi
+            package: http
+            interfaces: [outgoing-handler]
+
+    - name: keyvalue-nats
+      type: capability
+      properties:
+        image: ghcr.io/wasmcloud/keyvalue-nats:0.24.0
+      traits:
+        - type: link
+          properties:
+            target: gateway
+            namespace: wasi
+            package: keyvalue
+            interfaces: [store]
+            target_config:
+              - name: lc-kv-gateway
+                properties:
+                  bucket: lc-conversations
+        - type: link
+          properties:
+            target: executor
+            namespace: wasi
+            package: keyvalue
+            interfaces: [store]
+            target_config:
+              - name: lc-kv-executor
+                properties:
+                  bucket: lc-task-state
+        - type: link
+          properties:
+            target: memory-store
+            namespace: wasi
+            package: keyvalue
+            interfaces: [store, atomics]
+            target_config:
+              - name: lc-kv-memory
+                properties:
+                  bucket: lc-memory
+        - type: link
+          properties:
+            target: conversation-store
+            namespace: wasi
+            package: keyvalue
+            interfaces: [store]
+            target_config:
+              - name: lc-kv-conversations
+                properties:
+                  bucket: lc-conversations
+        - type: link
+          properties:
+            target: router
+            namespace: wasi
+            package: keyvalue
+            interfaces: [store]
+            target_config:
+              - name: lc-kv-router
+                properties:
+                  bucket: lc-router-rules
+        - type: link
+          properties:
+            target: event-logger
+            namespace: wasi
+            package: keyvalue
+            interfaces: [store]
+            target_config:
+              - name: lc-kv-events
+                properties:
+                  bucket: lc-events-journal
+        - type: link
+          properties:
+            target: telegram-gateway
+            namespace: wasi
+            package: keyvalue
+            interfaces: [store]
+            target_config:
+              - name: lc-kv-telegram
+                properties:
+                  bucket: lc-channel-sessions
+        - type: link
+          properties:
+            target: session-bridge
+            namespace: wasi
+            package: keyvalue
+            interfaces: [store, atomics]
+            target_config:
+              - name: lc-kv-sessions
+                properties:
+                  bucket: lc-channel-sessions
+
+    - name: messaging-nats
+      type: capability
+      properties:
+        image: ghcr.io/wasmcloud/messaging-nats:0.24.0
+      traits:
+        - type: link
+          properties:
+            target: gateway
+            namespace: wasmcloud
+            package: messaging
+            interfaces: [producer]
+            source_config:
+              - name: nats-local
+                properties:
+                  cluster_uris: "nats://127.0.0.1:4222"
+        - type: link
+          properties:
+            target: executor
+            namespace: wasmcloud
+            package: messaging
+            interfaces: [handler, producer]
+            source_config:
+              - name: nats-local
+                properties:
+                  cluster_uris: "nats://127.0.0.1:4222"
+                  subscriptions: "lc.task.submit,lc.step.result"
+        - type: link
+          properties:
+            target: agent
+            namespace: wasmcloud
+            package: messaging
+            interfaces: [handler, producer]
+            source_config:
+              - name: nats-local
+                properties:
+                  cluster_uris: "nats://127.0.0.1:4222"
+                  subscriptions: "lc.task.step.agent,lc.tool.result"
+        - type: link
+          properties:
+            target: tool-runner
+            namespace: wasmcloud
+            package: messaging
+            interfaces: [handler, producer]
+            source_config:
+              - name: nats-local
+                properties:
+                  cluster_uris: "nats://127.0.0.1:4222"
+                  subscriptions: "lc.tool.call"
+        - type: link
+          properties:
+            target: memory-store
+            namespace: wasmcloud
+            package: messaging
+            interfaces: [handler]
+            source_config:
+              - name: nats-local
+                properties:
+                  cluster_uris: "nats://127.0.0.1:4222"
+                  subscriptions: "lc.memory.>"
+        - type: link
+          properties:
+            target: conversation-store
+            namespace: wasmcloud
+            package: messaging
+            interfaces: [handler]
+            source_config:
+              - name: nats-local
+                properties:
+                  cluster_uris: "nats://127.0.0.1:4222"
+                  subscriptions: "lc.conversation.>"
+        - type: link
+          properties:
+            target: router
+            namespace: wasmcloud
+            package: messaging
+            interfaces: [handler, producer]
+            source_config:
+              - name: nats-local
+                properties:
+                  cluster_uris: "nats://127.0.0.1:4222"
+                  subscriptions: "lc.event.>"
+        - type: link
+          properties:
+            target: event-logger
+            namespace: wasmcloud
+            package: messaging
+            interfaces: [handler]
+            source_config:
+              - name: nats-local
+                properties:
+                  cluster_uris: "nats://127.0.0.1:4222"
+                  subscriptions: "lc.event.>"
+        - type: link
+          properties:
+            target: telegram-gateway
+            namespace: wasmcloud
+            package: messaging
+            interfaces: [handler, producer]
+            source_config:
+              - name: nats-local
+                properties:
+                  cluster_uris: "nats://127.0.0.1:4222"
+                  subscriptions: "lc.channel.telegram.out.>"
+        - type: link
+          properties:
+            target: session-bridge
+            namespace: wasmcloud
+            package: messaging
+            interfaces: [handler]
+            source_config:
+              - name: nats-local
+                properties:
+                  cluster_uris: "nats://127.0.0.1:4222"
+                  subscriptions: "lc.pair.>"

@@ -1,0 +1,62 @@
+package mycelium:pairing@0.1.0;
+
+/// Pair a CLI session with a Telegram chat so both share one conversation.
+///
+/// Flow:
+///   1. CLI calls request-code → receives "XK3F9"
+///   2. User sends `/pair XK3F9` to the Telegram bot
+///   3. telegram-gateway calls complete("XK3F9", chat_id)
+///   4. CLI polls get-by-session until pair-info arrives
+///   5. Both surfaces now share the same conversation-id
+interface pairing {
+    use mycelium:types/types@0.1.0.{
+        conversation-id,
+        agent-id,
+        domain-error,
+    };
+
+    record pair-request {
+        /// Stable ID for this CLI run (generate once per REPL session)
+        session-id: string,
+        /// Agent to use when the shared conversation is created
+        agent-id:   agent-id,
+        /// Code validity in seconds; clamped to max 300
+        expires-in: u32,
+    }
+
+    record pair-code {
+        /// Short alphanumeric code shown to the user, e.g. "XK3F9"
+        code:       string,
+        expires-at: u64,
+    }
+
+    record pair-info {
+        session-id:      string,
+        chat-id:         string,
+        conversation-id: conversation-id,
+        paired-at:       u64,
+    }
+
+    /// CLI calls this to get a displayable pairing code.
+    request-code: func(req: pair-request) -> result<pair-code, domain-error>;
+
+    /// Telegram gateway calls this when it receives `/pair <code>`.
+    /// Creates the shared conversation and persists the binding.
+    complete: func(
+        code:    string,
+        chat-id: string,
+    ) -> result<pair-info, domain-error>;
+
+    /// Poll by session-id; returns some once paired.
+    get-by-session: func(
+        session-id: string,
+    ) -> result<option<pair-info>, domain-error>;
+
+    /// Look up an active pairing by Telegram chat_id.
+    get-by-chat: func(
+        chat-id: string,
+    ) -> result<option<pair-info>, domain-error>;
+
+    /// Dissolve a pairing from either side.
+    unpair: func(session-id: string) -> result<_, domain-error>;
+}

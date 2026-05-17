@@ -1,0 +1,22 @@
+/target
+/Cargo.lock
+
+# WIT deps fetched by wkg — seeded by `just init-wit-deps`
+wit/deps/
+components/*/wit/deps/
+
+# wasmCloud build artifacts
+components/*/build/
+*.wasm
+
+# Config secrets
+config/*/secrets.env
+.env
+
+# OS
+.DS_Store
+
+
+# Ruvector
+
+**ruvector**

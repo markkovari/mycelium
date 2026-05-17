@@ -1,0 +1,21 @@
+package mycelium:router@0.1.0;
+
+interface router {
+    use mycelium:types/types@0.1.0.{domain-error};
+
+    record route-rule {
+        /// NATS subject pattern (may contain > or * wildcards)
+        subject-pattern: string,
+        /// Target subjects to fan-out to
+        targets:         list<string>,
+        /// Optional JMESPath filter — only route when this evaluates truthy
+        filter-jmespath: option<string>,
+    }
+
+    /// Register a routing rule (idempotent by subject-pattern).
+    register: func(rule: route-rule) -> result<_, domain-error>;
+
+    deregister: func(subject-pattern: string) -> result<_, domain-error>;
+
+    list-rules: func() -> result<list<route-rule>, domain-error>;
+}

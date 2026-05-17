@@ -1,0 +1,13 @@
+package mycelium:router-component@0.1.0;
+
+world router {
+    export wasmcloud:messaging/handler@0.2.0;
+
+    import wasmcloud:messaging/producer@0.2.0;
+    import wasi:keyvalue/store@0.2.0-draft;
+    import wasi:logging/logging@0.1.0-draft;
+    import wasi:clocks/wall-clock@0.2.2;
+
+    import mycelium:types/types@0.1.0;
+    import mycelium:router/router@0.1.0;
+}

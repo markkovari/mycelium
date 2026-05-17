@@ -1,0 +1,49 @@
+[workspace]
+resolver = "2"
+members = [
+    "components/gateway",
+    "components/executor",
+    "components/agent",
+    "components/tool-runner",
+    "components/memory-store",
+    "components/conversation-store",
+    "components/router",
+    "components/event-logger",
+    "components/telegram-gateway",
+    "components/session-bridge",
+    "crates/mycelium-types",
+    "crates/mycelium-agent-core",
+    "crates/mycelium-tool-core",
+    "crates/mycelium-cli",
+    "crates/mycelium-tests",
+]
+
+[workspace.package]
+version    = "0.1.0"
+edition    = "2021"
+license    = "Apache-2.0"
+repository = "https://github.com/markkovari/mycelium"
+
+[workspace.dependencies]
+wit-bindgen         = "0.41.0"
+wit-bindgen-rt      = "0.41.0"
+serde               = { version = "1", features = ["derive"] }
+serde_json          = "1"
+anyhow              = "1"
+uuid                = { version = "1", features = ["v4", "v7"] }
+async-nats          = "0.38"
+tokio               = { version = "1", features = ["full"] }
+tracing             = "0.1"
+tracing-subscriber  = { version = "0.3", features = ["env-filter"] }
+clap                = { version = "4", features = ["derive"] }
+rustyline           = "14"
+mycelium-types            = { path = "crates/mycelium-types" }
+mycelium-agent-core       = { path = "crates/mycelium-agent-core" }
+mycelium-tool-core        = { path = "crates/mycelium-tool-core" }
+
+[profile.release]
+opt-level     = "z"
+lto           = true
+strip         = true
+codegen-units = 1
+panic         = "abort"

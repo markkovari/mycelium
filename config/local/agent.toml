@@ -1,0 +1,21 @@
+# Local dev config — resolved at runtime via wasi:config/store.
+# Ollama running at localhost:11434 (no auth required).
+
+[agent]
+llm_api_url  = "http://localhost:11434/v1/chat/completions"
+llm_model    = "llama3.2"
+llm_api_key  = ""
+max_tokens   = 4096
+temperature  = "0.7"
+
+[nats]
+url              = "nats://127.0.0.1:4222"
+jetstream_domain = "default"
+
+[telegram]
+bot_token      = ""        # Leave empty to disable Telegram in local mode
+webhook_secret = ""
+webhook_url    = ""
+
+[cli]
+session_prefix = "cli"

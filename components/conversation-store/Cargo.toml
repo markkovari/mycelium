@@ -1,0 +1,23 @@
+[package]
+name              = "conversation-store"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wit-bindgen = { workspace = true }
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+anyhow      = { workspace = true }
+mycelium-types    = { workspace = true }
+uuid        = { workspace = true }
+
+[package.metadata.component]
+package = "mycelium:conversation-store"
+
+[package.metadata.component.target]
+path  = "wit"
+world = "conversation-store"
