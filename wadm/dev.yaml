@@ -149,41 +149,8 @@ spec:
             package: http
             interfaces: [outgoing-handler]
 
-    - name: keyvalue-nats
-      type: capability
-      properties:
-        image: ghcr.io/wasmcloud/keyvalue-nats:0.24.0
-      traits:
-        - type: link
-          properties:
-            target: memory-store
-            namespace: wasi
-            package: keyvalue
-            interfaces: [store, atomics]
-            target_config:
-              - name: lc-kv-memory
-                properties:
-                  bucket: lc-memory
-        - type: link
-          properties:
-            target: conversation-store
-            namespace: wasi
-            package: keyvalue
-            interfaces: [store]
-            target_config:
-              - name: lc-kv-conversations
-                properties:
-                  bucket: lc-conversations
-        - type: link
-          properties:
-            target: session-bridge
-            namespace: wasi
-            package: keyvalue
-            interfaces: [store, atomics]
-            target_config:
-              - name: lc-kv-sessions
-                properties:
-                  bucket: lc-channel-sessions
+    # wasi:keyvalue is provided by the wasmCloud host plugin (v2).
+    # No provider entry needed. Components open buckets via wasi:config at runtime.
 
     - name: messaging-nats
       type: capability
