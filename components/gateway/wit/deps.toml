@@ -1,0 +1,12 @@
+# WIT dependency declarations for wkg.
+# Run `wkg wit fetch --dir wit` to populate wit/deps/.
+# wash build runs this automatically.
+[dependencies]
+"wasi:http"           = "0.2.2"
+"wasi:keyvalue"       = "0.2.0-draft"
+"wasi:logging"        = "0.1.0-draft"
+"wasi:io"             = "0.2.2"
+"wasi:clocks"         = "0.2.2"
+"wasi:random"         = "0.2.2"
+"wasi:config"         = "0.2.0-draft"
+"wasmcloud:messaging" = "0.2.0"

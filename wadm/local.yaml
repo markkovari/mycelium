@@ -144,7 +144,7 @@ spec:
 
     # ── Capability Providers ─────────────────────────────────────────────────
 
-    - name: httpserver
+    - name: httpserver-gateway
       type: capability
       properties:
         image: ghcr.io/wasmcloud/http-server:0.26.0
@@ -159,6 +159,12 @@ spec:
               - name: gateway-http-config
                 properties:
                   address: "0.0.0.0:8080"
+
+    - name: httpserver-telegram
+      type: capability
+      properties:
+        image: ghcr.io/wasmcloud/http-server:0.26.0
+      traits:
         - type: link
           properties:
             target: telegram-gateway
@@ -170,31 +176,7 @@ spec:
                 properties:
                   address: "0.0.0.0:8081"
 
-    - name: http-client
-      type: capability
-      properties:
-        image: ghcr.io/wasmcloud/http-client:0.12.0
-      traits:
-        - type: link
-          properties:
-            target: agent
-            namespace: wasi
-            package: http
-            interfaces: [outgoing-handler]
-        - type: link
-          properties:
-            target: tool-runner
-            namespace: wasi
-            package: http
-            interfaces: [outgoing-handler]
-        - type: link
-          properties:
-            target: telegram-gateway
-            namespace: wasi
-            package: http
-            interfaces: [outgoing-handler]
-
-    # wasi:keyvalue is provided by the wasmCloud host plugin (v2).
+    # wasi:http/outgoing-handler and wasi:keyvalue are provided by the wasmCloud host plugin (v2).
     # No provider entry needed. Components open buckets via wasi:config at runtime.
 
     - name: messaging-nats
@@ -204,110 +186,120 @@ spec:
       traits:
         - type: link
           properties:
+            name: messaging-gateway
             target: gateway
             namespace: wasmcloud
             package: messaging
             interfaces: [producer]
             source_config:
-              - name: nats-local
+              - name: nats-local-gateway
                 properties:
                   cluster_uris: "nats://127.0.0.1:4222"
         - type: link
           properties:
+            name: messaging-executor
             target: executor
             namespace: wasmcloud
             package: messaging
             interfaces: [handler, producer]
             source_config:
-              - name: nats-local
+              - name: nats-local-executor
                 properties:
                   cluster_uris: "nats://127.0.0.1:4222"
                   subscriptions: "mycelium.task.submit,mycelium.step.result"
         - type: link
           properties:
+            name: messaging-agent
             target: agent
             namespace: wasmcloud
             package: messaging
             interfaces: [handler, producer]
             source_config:
-              - name: nats-local
+              - name: nats-local-agent
                 properties:
                   cluster_uris: "nats://127.0.0.1:4222"
                   subscriptions: "mycelium.task.step.agent,mycelium.tool.result"
         - type: link
           properties:
+            name: messaging-tool-runner
             target: tool-runner
             namespace: wasmcloud
             package: messaging
             interfaces: [handler, producer]
             source_config:
-              - name: nats-local
+              - name: nats-local-tool-runner
                 properties:
                   cluster_uris: "nats://127.0.0.1:4222"
                   subscriptions: "mycelium.tool.call"
         - type: link
           properties:
+            name: messaging-memory-store
             target: memory-store
             namespace: wasmcloud
             package: messaging
             interfaces: [handler]
             source_config:
-              - name: nats-local
+              - name: nats-local-memory-store
                 properties:
                   cluster_uris: "nats://127.0.0.1:4222"
                   subscriptions: "mycelium.memory.>"
         - type: link
           properties:
+            name: messaging-conversation-store
             target: conversation-store
             namespace: wasmcloud
             package: messaging
             interfaces: [handler]
             source_config:
-              - name: nats-local
+              - name: nats-local-conversation-store
                 properties:
                   cluster_uris: "nats://127.0.0.1:4222"
                   subscriptions: "mycelium.conversation.>"
         - type: link
           properties:
+            name: messaging-router
             target: router
             namespace: wasmcloud
             package: messaging
             interfaces: [handler, producer]
             source_config:
-              - name: nats-local
+              - name: nats-local-router
                 properties:
                   cluster_uris: "nats://127.0.0.1:4222"
                   subscriptions: "mycelium.event.>"
         - type: link
           properties:
+            name: messaging-event-logger
             target: event-logger
             namespace: wasmcloud
             package: messaging
             interfaces: [handler]
             source_config:
-              - name: nats-local
+              - name: nats-local-event-logger
                 properties:
                   cluster_uris: "nats://127.0.0.1:4222"
                   subscriptions: "mycelium.event.>"
         - type: link
           properties:
+            name: messaging-telegram
             target: telegram-gateway
             namespace: wasmcloud
             package: messaging
             interfaces: [handler, producer]
             source_config:
-              - name: nats-local
+              - name: nats-local-telegram
                 properties:
                   cluster_uris: "nats://127.0.0.1:4222"
                   subscriptions: "mycelium.channel.telegram.out.>"
         - type: link
           properties:
+            name: messaging-session-bridge
             target: session-bridge
             namespace: wasmcloud
             package: messaging
             interfaces: [handler]
             source_config:
-              - name: nats-local
+              - name: nats-local-session-bridge
                 properties:
                   cluster_uris: "nats://127.0.0.1:4222"
                   subscriptions: "mycelium.pair.>"

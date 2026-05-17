@@ -114,7 +114,7 @@ spec:
             properties:
               bucket: mycelium-channel-sessions
 
-    - name: httpserver
+    - name: httpserver-gateway
       type: capability
       properties:
         image: ghcr.io/wasmcloud/http-server:0.26.0
@@ -129,6 +129,12 @@ spec:
               - name: gateway-http-config
                 properties:
                   address: "0.0.0.0:8080"
+
+    - name: httpserver-telegram
+      type: capability
+      properties:
+        image: ghcr.io/wasmcloud/http-server:0.26.0
+      traits:
         - type: link
           properties:
             target: telegram-gateway
@@ -140,31 +146,7 @@ spec:
                 properties:
                   address: "0.0.0.0:8081"
 
-    - name: http-client
-      type: capability
-      properties:
-        image: ghcr.io/wasmcloud/http-client:0.12.0
-      traits:
-        - type: link
-          properties:
-            target: agent
-            namespace: wasi
-            package: http
-            interfaces: [outgoing-handler]
-        - type: link
-          properties:
-            target: tool-runner
-            namespace: wasi
-            package: http
-            interfaces: [outgoing-handler]
-        - type: link
-          properties:
-            target: telegram-gateway
-            namespace: wasi
-            package: http
-            interfaces: [outgoing-handler]
-
-    # wasi:keyvalue is provided by the wasmCloud host plugin (v2).
+    # wasi:http/outgoing-handler and wasi:keyvalue are provided by the wasmCloud host plugin (v2).
     # No provider entry needed. Components open buckets via wasi:config at runtime.
 
     - name: messaging-nats
