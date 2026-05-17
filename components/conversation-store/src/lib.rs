@@ -16,10 +16,7 @@ impl exports::mycelium::conversation::conversations::Guest for Component {
     fn create(
         agent_id: String,
         title: Option<String>,
-    ) -> Result<
-        mycelium::types::types::Conversation,
-        mycelium::types::types::DomainError,
-    > {
+    ) -> Result<mycelium::types::types::Conversation, mycelium::types::types::DomainError> {
         let _ = (agent_id, title);
         // TODO: generate UUID, write to KV, return Conversation
         Err(mycelium::types::types::DomainError::Internal(
@@ -29,29 +26,20 @@ impl exports::mycelium::conversation::conversations::Guest for Component {
 
     fn get(
         id: String,
-    ) -> Result<
-        mycelium::types::types::Conversation,
-        mycelium::types::types::DomainError,
-    > {
+    ) -> Result<mycelium::types::types::Conversation, mycelium::types::types::DomainError> {
         let _ = id;
-        Err(mycelium::types::types::DomainError::NotFound(
-            id.clone(),
-        ))
+        Err(mycelium::types::types::DomainError::NotFound(id.clone()))
     }
 
     fn list(
         agent_id: String,
-    ) -> Result<
-        Vec<mycelium::types::types::Conversation>,
-        mycelium::types::types::DomainError,
-    > {
+    ) -> Result<Vec<mycelium::types::types::Conversation>, mycelium::types::types::DomainError>
+    {
         let _ = agent_id;
         Ok(vec![])
     }
 
-    fn delete(
-        id: String,
-    ) -> Result<(), mycelium::types::types::DomainError> {
+    fn delete(id: String) -> Result<(), mycelium::types::types::DomainError> {
         let _ = id;
         Ok(())
     }
@@ -70,8 +58,7 @@ impl exports::mycelium::conversation::conversations::Guest for Component {
 
     fn get_messages(
         conversation_id: String,
-    ) -> Result<Vec<mycelium::types::types::Message>, mycelium::types::types::DomainError>
-    {
+    ) -> Result<Vec<mycelium::types::types::Message>, mycelium::types::types::DomainError> {
         let _ = conversation_id;
         Ok(vec![])
     }
@@ -79,17 +66,14 @@ impl exports::mycelium::conversation::conversations::Guest for Component {
     fn get_messages_after(
         conversation_id: String,
         after_id: String,
-    ) -> Result<Vec<mycelium::types::types::Message>, mycelium::types::types::DomainError>
-    {
+    ) -> Result<Vec<mycelium::types::types::Message>, mycelium::types::types::DomainError> {
         let _ = (conversation_id, after_id);
         Ok(vec![])
     }
 }
 
 impl exports::wasmcloud::messaging::handler::Guest for Component {
-    fn handle_message(
-        msg: wasmcloud::messaging::types::BrokerMessage,
-    ) -> Result<(), String> {
+    fn handle_message(msg: wasmcloud::messaging::types::BrokerMessage) -> Result<(), String> {
         let _ = msg;
         Ok(())
     }

@@ -8,9 +8,9 @@
 
 use anyhow::{Context, Result};
 use clap::Parser;
+use futures_util::StreamExt;
 use mycelium_types::{ChannelMessage, PairCode, PairInfo};
 use rustyline::DefaultEditor;
-use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
@@ -18,7 +18,11 @@ use uuid::Uuid;
 #[derive(Parser, Debug)]
 #[command(name = "lc", about = "mycelium interactive agent REPL")]
 struct Args {
-    #[arg(long, default_value = "nats://127.0.0.1:4222", env = "MYCELIUM_NATS_URL")]
+    #[arg(
+        long,
+        default_value = "nats://127.0.0.1:4222",
+        env = "MYCELIUM_NATS_URL"
+    )]
     nats_url: String,
 
     #[arg(long, default_value = "default", env = "MYCELIUM_AGENT_ID")]
@@ -74,7 +78,7 @@ async fn main() -> Result<()> {
             .await
         {
             Ok(info) => {
-                println!("\n✓ Paired with Telegram chat {}", &info.chat_id);
+                println!("\n✓ Paired with Telegram chat {}", info.chat_id);
                 Some(info)
             }
             Err(e) => {
@@ -87,7 +91,7 @@ async fn main() -> Result<()> {
     let conv_id = pair_info.as_ref().map(|p| p.conversation_id.clone());
     let prompt = match &pair_info {
         Some(p) => format!("[{}]> ", &p.conversation_id[..8]),
-        None    => "[unpaired]> ".to_string(),
+        None => "[unpaired]> ".to_string(),
     };
 
     // Spawn background task to print replies
@@ -115,12 +119,7 @@ async fn main() -> Result<()> {
     let mut rl = DefaultEditor::new().context("failed to init readline")?;
     let mut seq: u64 = 0;
 
-    loop {
-        let line = match rl.readline(&prompt) {
-            Ok(l)  => l,
-            Err(_) => break,
-        };
-
+    while let Ok(line) = rl.readline(&prompt) {
         let text = line.trim();
         if text.is_empty() {
             continue;
@@ -133,7 +132,10 @@ async fn main() -> Result<()> {
         if text == "/unpair" {
             if let Some(ref p) = pair_info {
                 let _ = client
-                    .publish("mycelium.pair.unpair", p.session_id.as_bytes().into())
+                    .publish(
+                        "mycelium.pair.unpair",
+                        p.session_id.as_bytes().to_vec().into(),
+                    )
                     .await;
                 println!("Unpaired.");
             }
@@ -142,19 +144,16 @@ async fn main() -> Result<()> {
 
         seq += 1;
         let msg = ChannelMessage {
-            channel_msg_id:  format!("{session_id}-{seq}"),
-            sender_id:       session_id.clone(),
+            channel_msg_id: format!("{session_id}-{seq}"),
+            sender_id: session_id.clone(),
             conversation_id: conv_id.clone(),
-            agent_id:        Some(args.agent_id.clone()),
-            text:            text.to_string(),
-            raw_json:        "{}".into(),
+            agent_id: Some(args.agent_id.clone()),
+            text: text.to_string(),
+            raw_json: "{}".into(),
         };
 
         let payload = serde_json::to_vec(&msg).unwrap_or_default();
-        if let Err(e) = client
-            .publish("mycelium.channel.in", payload.into())
-            .await
-        {
+        if let Err(e) = client.publish("mycelium.channel.in", payload.into()).await {
             eprintln!("publish error: {e}");
         }
 
@@ -186,8 +185,8 @@ async fn request_and_await_pair(
     .await
     .context("pair request timed out")??;
 
-    let code: PairCode = serde_json::from_slice(&resp.payload)
-        .context("invalid PairCode response")?;
+    let code: PairCode =
+        serde_json::from_slice(&resp.payload).context("invalid PairCode response")?;
 
     println!();
     println!("  ╔══════════════════════════════════════════╗");
@@ -212,15 +211,18 @@ async fn request_and_await_pair(
 
         let poll_resp = tokio::time::timeout(
             std::time::Duration::from_secs(3),
-            client.request("mycelium.pair.get-by-session", session_id.as_bytes().into()),
+            client.request(
+                "mycelium.pair.get-by-session",
+                session_id.as_bytes().to_vec().into(),
+            ),
         )
         .await;
 
         if let Ok(Ok(r)) = poll_resp {
             let val: serde_json::Value = serde_json::from_slice(&r.payload).unwrap_or_default();
             if val.get("conversation_id").is_some() {
-                let info: PairInfo = serde_json::from_value(val)
-                    .context("invalid PairInfo response")?;
+                let info: PairInfo =
+                    serde_json::from_value(val).context("invalid PairInfo response")?;
                 return Ok(info);
             }
         }

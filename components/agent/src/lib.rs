@@ -11,9 +11,7 @@ wit_bindgen::generate!({
 struct Component;
 
 impl exports::wasmcloud::messaging::handler::Guest for Component {
-    fn handle_message(
-        msg: wasmcloud::messaging::types::BrokerMessage,
-    ) -> Result<(), String> {
+    fn handle_message(msg: wasmcloud::messaging::types::BrokerMessage) -> Result<(), String> {
         let _ = msg;
         // TODO: read agent-config from KV
         //       build LLM message list via agent-step::build-messages

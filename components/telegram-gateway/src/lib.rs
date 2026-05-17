@@ -30,9 +30,7 @@ impl exports::wasi::http::incoming_handler::Guest for Component {
 }
 
 impl exports::wasmcloud::messaging::handler::Guest for Component {
-    fn handle_message(
-        msg: wasmcloud::messaging::types::BrokerMessage,
-    ) -> Result<(), String> {
+    fn handle_message(msg: wasmcloud::messaging::types::BrokerMessage) -> Result<(), String> {
         let _ = msg;
         // TODO:
         // 1. deserialize ChannelReply from msg.body

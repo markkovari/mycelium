@@ -44,7 +44,7 @@ logs:
 
 # Fetch external WIT deps into wit/deps/ using wkg
 fetch-wit-deps:
-    wkg wit fetch --dir wit
+    wkg wit fetch -d wit
 
 # Seed each component's wit/deps/ from the workspace wit/ directory.
 # Run once after clone, and whenever wit/*.wit or wit/deps/ changes.
@@ -65,6 +65,8 @@ init-wit-deps: fetch-wit-deps
         ["mycelium-router-0.1.0"]="wit/router.wit"
         ["mycelium-channel-0.1.0"]="wit/channel.wit"
         ["mycelium-pairing-0.1.0"]="wit/pairing.wit"
+        ["mycelium-cron-0.1.0"]="wit/cron.wit"
+        ["mycelium-batch-0.1.0"]="wit/batch.wit"
     )
 
     for comp in {{components}}; do

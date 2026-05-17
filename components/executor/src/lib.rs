@@ -10,9 +10,7 @@ wit_bindgen::generate!({
 struct Component;
 
 impl exports::wasmcloud::messaging::handler::Guest for Component {
-    fn handle_message(
-        msg: wasmcloud::messaging::types::BrokerMessage,
-    ) -> Result<(), String> {
+    fn handle_message(msg: wasmcloud::messaging::types::BrokerMessage) -> Result<(), String> {
         let _ = msg;
         // TODO: deserialize Task from msg.body
         //       write initial TaskState → KV

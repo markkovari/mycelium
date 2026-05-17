@@ -30,17 +30,12 @@ impl exports::mycelium::memory::memory::Guest for Component {
         Ok(None)
     }
 
-    fn delete(
-        agent_id: String,
-        key: String,
-    ) -> Result<(), mycelium::types::types::DomainError> {
+    fn delete(agent_id: String, key: String) -> Result<(), mycelium::types::types::DomainError> {
         let _ = (agent_id, key);
         Ok(())
     }
 
-    fn list_keys(
-        agent_id: String,
-    ) -> Result<Vec<String>, mycelium::types::types::DomainError> {
+    fn list_keys(agent_id: String) -> Result<Vec<String>, mycelium::types::types::DomainError> {
         let _ = agent_id;
         Ok(vec![])
     }
@@ -55,9 +50,7 @@ impl exports::mycelium::memory::memory::Guest for Component {
 }
 
 impl exports::wasmcloud::messaging::handler::Guest for Component {
-    fn handle_message(
-        msg: wasmcloud::messaging::types::BrokerMessage,
-    ) -> Result<(), String> {
+    fn handle_message(msg: wasmcloud::messaging::types::BrokerMessage) -> Result<(), String> {
         let _ = msg;
         // TODO: handle mycelium.memory.> request-reply for native clients
         Ok(())

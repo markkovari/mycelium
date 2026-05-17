@@ -34,8 +34,7 @@ mod integration {
             .await
             .expect("request-reply failed");
 
-        let body: serde_json::Value =
-            serde_json::from_slice(&resp.payload).expect("invalid JSON");
+        let body: serde_json::Value = serde_json::from_slice(&resp.payload).expect("invalid JSON");
 
         assert!(body.get("code").is_some(), "response must contain 'code'");
     }

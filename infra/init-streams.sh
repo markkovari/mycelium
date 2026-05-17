@@ -43,14 +43,14 @@ create_stream MYCELIUM_PAIRING        "mycelium.pair.>"         memory 10m
 
 echo ""
 echo "==> Creating KV buckets"
-create_kv lc-task-state
-create_kv lc-memory
-create_kv lc-conversations
-create_kv lc-messages        50
-create_kv lc-agent-config
-create_kv lc-router-rules
-create_kv lc-channel-sessions
-create_kv lc-events-journal  1
+create_kv mycelium-task-state
+create_kv mycelium-memory
+create_kv mycelium-conversations
+create_kv mycelium-messages        50
+create_kv mycelium-agent-config
+create_kv mycelium-router-rules
+create_kv mycelium-channel-sessions
+create_kv mycelium-events-journal  1
 
 echo ""
 echo "Done. Run \`wash app deploy wadm/local.yaml\` to start components."
