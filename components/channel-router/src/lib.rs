@@ -9,11 +9,91 @@ wit_bindgen::generate!({
     generate_all,
 });
 
-use serde::Serialize;
-use serde_json::Value;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 
 const TELEGRAM_RAW: &str = "mycelium.channel.telegram.raw";
 const CHANNEL_IN: &str = "mycelium.channel.in";
+const STEP_RESULT: &str = "mycelium.step.result";
+const TASK_SUBMIT: &str = "mycelium.task.submit";
+const PENDING_BUCKET: &str = "mycelium-channel-pending";
+
+fn cfg(key: &str) -> Option<String> {
+    wasi::config::store::get(key).ok().flatten()
+}
+
+fn random_uuid_v4() -> String {
+    // RFC 4122 v4: 16 random bytes, set version + variant.
+    let bytes: [u8; 16] = wasi::random::random::get_random_bytes(16)
+        .as_slice()
+        .try_into()
+        .unwrap_or([0; 16]);
+    let mut b = bytes;
+    b[6] = (b[6] & 0x0f) | 0x40;
+    b[8] = (b[8] & 0x3f) | 0x80;
+    format!(
+        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
+        b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]
+    )
+}
+
+fn pick_default_agent() -> Option<String> {
+    if let Some(id) = cfg("default.agent_id") {
+        if !id.is_empty() {
+            return Some(id);
+        }
+    }
+    mycelium::agent::agent_registry::list_agents()
+        .ok()
+        .and_then(|v| v.into_iter().next().map(|a| a.id))
+}
+
+#[derive(Serialize, Deserialize)]
+struct PendingTask {
+    channel: String,
+    chat_id: String,
+}
+
+fn save_pending(task_id: &str, channel: &str, chat_id: &str) {
+    let Ok(bucket) = wasi::keyvalue::store::open(PENDING_BUCKET) else { return };
+    let pt = PendingTask {
+        channel: channel.to_string(),
+        chat_id: chat_id.to_string(),
+    };
+    if let Ok(bytes) = serde_json::to_vec(&pt) {
+        let _ = bucket.set(task_id, &bytes);
+    }
+}
+
+fn load_pending(task_id: &str) -> Option<PendingTask> {
+    let bucket = wasi::keyvalue::store::open(PENDING_BUCKET).ok()?;
+    let bytes = bucket.get(task_id).ok().flatten()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+fn delete_pending(task_id: &str) {
+    if let Ok(bucket) = wasi::keyvalue::store::open(PENDING_BUCKET) {
+        let _ = bucket.delete(task_id);
+    }
+}
+
+fn now_iso() -> String {
+    let now = wasi::clocks::wall_clock::now();
+    let secs = now.seconds as i64;
+    // RFC3339 UTC, fixed offset
+    let days = secs.div_euclid(86_400);
+    let rem = secs.rem_euclid(86_400);
+    let (h, m, s) = (rem / 3600, (rem / 60) % 60, rem % 60);
+    // Simple Y/M/D from epoch — good enough for logging; agent doesn't parse it.
+    let year_full = 1970 + (days / 365);
+    let mo = ((days % 365) / 30) + 1;
+    let d = ((days % 365) % 30) + 1;
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+        year_full, mo, d, h, m, s
+    )
+}
 
 fn log(level: wasi::logging::logging::Level, msg: &str) {
     wasi::logging::logging::log(level, "channel-router", msg);
@@ -104,14 +184,76 @@ fn handle_telegram_raw(body: &[u8]) {
     let raw_json = update.to_string();
     let canonical = CanonicalMessage {
         channel: "telegram",
-        channel_msg_id: message_id,
-        sender_id: chat_id,
+        channel_msg_id: message_id.clone(),
+        sender_id: chat_id.clone(),
         text,
         raw_json: &raw_json,
     };
     if let Ok(bytes) = serde_json::to_vec(&canonical) {
         publish(CHANNEL_IN, bytes);
     }
+
+    if text.is_empty() {
+        return;
+    }
+    let Some(agent_id) = pick_default_agent() else {
+        log(
+            wasi::logging::logging::Level::Warn,
+            "no agent registered; create one with /agent create or POST /agents",
+        );
+        return;
+    };
+
+    // Show typing indicator so the user knows the bot is thinking.
+    publish(
+        &format!("mycelium.channel.telegram.action.{chat_id}"),
+        b"{\"action\":\"typing\"}".to_vec(),
+    );
+
+    let task_id = random_uuid_v4();
+    let conv_id = random_uuid_v4();
+    let task = json!({
+        "id": task_id,
+        "conversation_id": conv_id,
+        "agent_id": agent_id,
+        "input": text,
+        "created_at": now_iso(),
+    });
+    save_pending(&task_id, "telegram", &chat_id);
+    if let Ok(bytes) = serde_json::to_vec(&task) {
+        publish(TASK_SUBMIT, bytes);
+    }
+}
+
+fn handle_step_result(body: &[u8]) {
+    let res: Value = match serde_json::from_slice(body) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+    let Some(task_id) = res.get("task_id").and_then(|v| v.as_str()) else { return };
+    let Some(pending) = load_pending(task_id) else { return };
+    let text = res
+        .get("output")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .or_else(|| {
+            res.get("error")
+                .and_then(|v| v.as_str())
+                .map(|e| format!("(error: {e})"))
+        })
+        .unwrap_or_else(|| "(no response)".to_string());
+
+    if pending.channel == "telegram" {
+        let reply = json!({"recipient_id": pending.chat_id, "text": text});
+        if let Ok(bytes) = serde_json::to_vec(&reply) {
+            publish(
+                &format!("mycelium.channel.telegram.out.{}", pending.chat_id),
+                bytes,
+            );
+        }
+    }
+    delete_pending(task_id);
 }
 
 struct Component;
@@ -120,6 +262,7 @@ impl exports::wasmcloud::messaging::handler::Guest for Component {
     fn handle_message(msg: wasmcloud::messaging::types::BrokerMessage) -> Result<(), String> {
         match msg.subject.as_str() {
             TELEGRAM_RAW => handle_telegram_raw(&msg.body),
+            STEP_RESULT => handle_step_result(&msg.body),
             _ => {}
         }
         Ok(())
