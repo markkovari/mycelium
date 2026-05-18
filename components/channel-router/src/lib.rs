@@ -40,7 +40,7 @@ fn random_uuid_v4() -> String {
 
 fn pick_default_agent() -> Option<String> {
     if let Some(id) = cfg("default.agent_id") {
-        if !id.is_empty() {
+        if !id.is_empty() && id != "auto" {
             return Some(id);
         }
     }
