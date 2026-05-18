@@ -67,14 +67,37 @@ fn publish(subject: &str, body: Vec<u8>) {
     });
 }
 
+fn try_acquire_lock() -> bool {
+    let Ok(bucket) = wasi::keyvalue::store::open(STATE_BUCKET) else { return false };
+    // exists() acts as our serialization gate; first tick to set it wins, all
+    // concurrent invocations after that observe lock==1 and bail.
+    if matches!(bucket.exists("lock"), Ok(true)) {
+        return false;
+    }
+    let _ = bucket.set("lock", b"1");
+    true
+}
+
+fn release_lock() {
+    if let Ok(bucket) = wasi::keyvalue::store::open(STATE_BUCKET) {
+        let _ = bucket.delete("lock");
+    }
+}
+
 fn tick_once() {
     // Self-tick is re-published at the END of this fn so we don't queue up a
     // tick storm while we're still blocked on Telegram's long-poll.
+    if !try_acquire_lock() {
+        // Another invocation is already polling. Bail without re-arming so
+        // the running one is responsible for the next tick.
+        return;
+    }
     let Some(token) = cfg("telegram.bot_token") else {
         log(
             wasi::logging::logging::Level::Warn,
             "telegram.bot_token not configured; idling",
         );
+        release_lock();
         sleep_ms(2_000);
         return;
     };
@@ -126,6 +149,7 @@ fn tick_once() {
         }
     }
     // Re-arm the loop exactly once per completed tick.
+    release_lock();
     publish(TICK_SUBJECT, Vec::new());
 }
 
