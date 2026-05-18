@@ -8,9 +8,10 @@ license.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-wit-bindgen = { workspace = true }
-serde       = { workspace = true }
-serde_json  = { workspace = true }
+wit-bindgen       = { workspace = true }
+serde             = { workspace = true }
+serde_json        = { workspace = true }
+mycelium-telegram = { path = "../../crates/mycelium-telegram" }
 
 [package.metadata.component]
 package = "mycelium:telegram-poller"

@@ -1,17 +1,16 @@
-// Telegram transport adapter.
+// Telegram transport adapter — long polling.
 //
-// One job: long-poll Telegram and emit every raw update to NATS.
-// Subject: `mycelium.channel.telegram.raw`. Payload = the raw `result[i]` JSON.
+// Drains the Telegram Bot API and emits raw updates on
+// `mycelium.channel.telegram.raw`. Self-ticks on
+// `mycelium.telegram.poll.tick`. Persists update_id offset in
+// `mycelium-telegram-poller-state` KV.
 //
-// Self-tick: subscribes `mycelium.telegram.poll.tick`. Each invocation does
-// one getUpdates round and re-publishes the tick at the end. Deploy script
-// fires the first tick.
-//
-// Offset persisted in `mycelium-telegram-poller-state` KV (key `telegram/offset`).
+// All Telegram I/O lives in the `mycelium-telegram` crate so this file
+// stays orchestration-only.
 //
 // Config (wasi:config/store):
-//   telegram.bot_token        BotFather token (required to do real work)
-//   telegram.poll_timeout_s   Telegram long-poll timeout (default 25)
+//   telegram.bot_token        BotFather token (required)
+//   telegram.poll_timeout_s   long-poll timeout (default 25)
 //   telegram.poll_idle_ms     sleep between empty polls (default 500)
 wit_bindgen::generate!({
     path: "wit",
@@ -19,11 +18,7 @@ wit_bindgen::generate!({
     generate_all,
 });
 
-use serde::Deserialize;
-use serde_json::Value;
-
-use wasi::http::outgoing_handler;
-use wasi::http::types::{Fields, Method, OutgoingBody, OutgoingRequest, Scheme};
+use mycelium_telegram::TgClient;
 
 const STATE_BUCKET: &str = "mycelium-telegram-poller-state";
 const OFFSET_KEY: &str = "telegram/offset";
@@ -64,58 +59,6 @@ fn write_offset(n: u64) {
     }
 }
 
-fn http_get(host: &str, path_and_query: &str) -> Result<Vec<u8>, String> {
-    let headers = Fields::new();
-    headers
-        .set(&"accept".to_string(), &[b"application/json".to_vec()])
-        .map_err(|e| format!("set accept: {e:?}"))?;
-
-    let req = OutgoingRequest::new(headers);
-    req.set_method(&Method::Get)
-        .map_err(|_| "set method".to_string())?;
-    req.set_scheme(Some(&Scheme::Https))
-        .map_err(|_| "set scheme".to_string())?;
-    req.set_authority(Some(&host.to_string()))
-        .map_err(|_| "set authority".to_string())?;
-    req.set_path_with_query(Some(&path_and_query.to_string()))
-        .map_err(|_| "set path".to_string())?;
-
-    let outgoing_body = req.body().map_err(|_| "no outgoing body".to_string())?;
-    OutgoingBody::finish(outgoing_body, None).map_err(|e| format!("finish: {e:?}"))?;
-
-    let future_resp = outgoing_handler::handle(req, None).map_err(|e| format!("handle: {e:?}"))?;
-    future_resp.subscribe().block();
-    let resp = future_resp
-        .get()
-        .ok_or_else(|| "response missing".to_string())?
-        .map_err(|_| "response already consumed".to_string())?
-        .map_err(|e| format!("recv: {e:?}"))?;
-
-    let incoming_body = resp.consume().map_err(|_| "no body".to_string())?;
-    let stream = incoming_body
-        .stream()
-        .map_err(|_| "no body stream".to_string())?;
-    let mut buf = Vec::new();
-    loop {
-        match stream.blocking_read(8192) {
-            Ok(chunk) if chunk.is_empty() => break,
-            Ok(chunk) => buf.extend_from_slice(&chunk),
-            Err(_) => break,
-        }
-    }
-    drop(stream);
-    Ok(buf)
-}
-
-#[derive(Deserialize)]
-struct TgResponse {
-    ok: bool,
-    #[serde(default)]
-    result: Vec<Value>,
-    #[serde(default)]
-    description: Option<String>,
-}
-
 fn publish(subject: &str, body: Vec<u8>) {
     let _ = wasmcloud::messaging::consumer::publish(&wasmcloud::messaging::types::BrokerMessage {
         subject: subject.to_string(),
@@ -124,27 +67,7 @@ fn publish(subject: &str, body: Vec<u8>) {
     });
 }
 
-fn max_update_id(updates: &[Value]) -> Option<u64> {
-    updates
-        .iter()
-        .filter_map(|v| v.get("update_id")?.as_u64())
-        .max()
-}
-
-fn poll_once(token: &str, offset: u64, timeout_s: u32) -> Result<Vec<Value>, String> {
-    let path = format!("/bot{token}/getUpdates?offset={offset}&timeout={timeout_s}");
-    let bytes = http_get("api.telegram.org", &path)?;
-    let parsed: TgResponse = serde_json::from_slice(&bytes).map_err(|e| format!("decode: {e}"))?;
-    if !parsed.ok {
-        return Err(parsed
-            .description
-            .unwrap_or_else(|| "telegram returned ok=false".to_string()));
-    }
-    Ok(parsed.result)
-}
-
 fn tick_once() {
-    // Always re-arm the loop first.
     publish(TICK_SUBJECT, Vec::new());
 
     let Some(token) = cfg("telegram.bot_token") else {
@@ -162,15 +85,17 @@ fn tick_once() {
         .and_then(|s| s.parse().ok())
         .unwrap_or(500);
 
+    let client = TgClient::new(token);
     let offset = read_offset();
-    match poll_once(&token, offset, timeout_s) {
+
+    match client.get_updates(offset, timeout_s) {
         Ok(updates) => {
             for u in &updates {
                 let bytes = serde_json::to_vec(u).unwrap_or_default();
                 publish(RAW_SUBJECT, bytes);
             }
-            if let Some(m) = max_update_id(&updates) {
-                write_offset(m + 1);
+            if let Some(max) = updates.iter().map(|u| u.update_id).max() {
+                write_offset(max + 1);
             }
             if updates.is_empty() {
                 sleep_ms(idle_ms);
