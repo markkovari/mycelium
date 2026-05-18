@@ -78,7 +78,7 @@ cmd_provider() {
         gemini)
             [ -z "$v" ] && die "gemini provider needs API key"
             endpoint="https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
-            model="${MYCELIUM_MODEL:-gemini-flash-lite-latest}"
+            model="${MYCELIUM_MODEL:-gemini-2.5-flash-lite}"
             set_secret "LLM_ENDPOINT" "$endpoint"
             set_secret "LLM_MODEL" "$model"
             set_secret "LLM_API_KEY" "$v"
@@ -305,7 +305,7 @@ BANNER
             local key model
             prompt_secret key "  Gemini API key"
             [ -z "$key" ] && die "key required"
-            prompt model "  Model" "gemini-flash-lite-latest"
+            prompt model "  Model" "gemini-2.5-flash-lite"
             MYCELIUM_MODEL="$model" cmd_provider gemini "$key" >/dev/null
             log "Gemini provider configured (model=$model)"
             ;;
