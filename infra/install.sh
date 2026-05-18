@@ -91,9 +91,16 @@ if ! command -v wash >/dev/null 2>&1; then
     if ! curl -fsSL https://wasmcloud.com/sh | bash; then
         die "wash install failed; try installing manually from https://github.com/wasmCloud/wash/releases"
     fi
-    # The installer typically drops wash in ~/.wasmcloud or /usr/local/bin; verify
+    # The installer drops wash in ~/.wash/bin (current) or ~/.wasmcloud (older); locate and symlink.
+    for cand in "$HOME/.wash/bin/wash" "$HOME/.wasmcloud/bin/wash" "/usr/local/bin/wash"; do
+        if [ -x "$cand" ]; then
+            export PATH="$(dirname "$cand"):$PATH"
+            $SUDO ln -sf "$cand" "$MYCELIUM_PREFIX/bin/wash"
+            break
+        fi
+    done
     if ! command -v wash >/dev/null 2>&1; then
-        die "wash installed but not on PATH"
+        die "wash installed but binary not found in ~/.wash/bin or ~/.wasmcloud/bin"
     fi
 else
     log "wash already installed: $(command -v wash)"
