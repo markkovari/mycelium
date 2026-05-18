@@ -12,5 +12,4 @@ world session-bridge {
     import wasi:random/random@0.2.2;
 
     import mycelium:types/types@0.1.0;
-    import mycelium:conversation/conversations@0.1.0;
 }

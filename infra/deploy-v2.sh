@@ -7,7 +7,7 @@
 #
 # Layout:
 #   mycelium-api          = gateway + conversation-store    (HTTP-driven)
-#   mycelium-telegram-in  = telegram-gateway                (HTTP webhook receiver)
+#   mycelium-telegram-poll= telegram-poller (Service)        (long-poll, no public URL needed)
 #   mycelium-telegram-out = telegram-out                    (NATS → Telegram API)
 #   mycelium-pairing      = session-bridge                  (NATS RPC for cli pairing)
 #   mycelium-executor     = executor                        (NATS task.submit)
@@ -64,7 +64,9 @@ build_iface_array() {
         if [ -n "$cfg" ]; then
             cfg_json="{"
             local cf=1
-            IFS=',' read -ra carr <<< "$cfg"
+            # cfg pairs use `+` as separator so values can contain commas
+            # (e.g. messaging subscription lists).
+            IFS='+' read -ra carr <<< "$cfg"
             for kv in "${carr[@]}"; do
                 local k="${kv%%=*}"
                 local v="${kv#*=}"
@@ -102,6 +104,14 @@ deploy_workload() {
     local name="$2"
     local components_json="$3"
     local ifaces_json="$4"
+    local service_name="${5:-}"
+
+    local service_json="null"
+    if [ -n "$service_name" ]; then
+        local image="${OCI_REGISTRY}/${service_name}:${IMAGE_TAG}"
+        service_json="{\"image\":\"$image\",\"image_pull_policy\":\"$PULL_POLICY\",\"max_restarts\":3}"
+    fi
+
     local payload
     payload=$(cat <<EOF
 {
@@ -110,7 +120,7 @@ deploy_workload() {
     "namespace": "mycelium",
     "name": "${name}",
     "annotations": {"managed-by": "mycelium-deploy-v2"},
-    "service": null,
+    "service": ${service_json},
     "wit_world": {
       "components": ${components_json},
       "host_interfaces": ${ifaces_json}
@@ -138,15 +148,16 @@ POOL_SIZE_DEFAULT="${POOL_SIZE_DEFAULT:-1}"
 # ifaces: pipe-separated specs (ns:pkg:iface1,iface2[:cfg_k=v,cfg_k=v])
 WORKLOADS=(
     "mycelium-api;api;gateway,conversation-store,agent-registry;wasi:http:incoming-handler:host=localhost|wasi:keyvalue:store|wasi:logging:logging;${POOL_SIZE_API}"
-    "mycelium-telegram-in;telegram-in;telegram-gateway,agent-registry;wasi:http:incoming-handler:host=telegram.localhost|wasi:config:store|wasi:keyvalue:store|wasi:logging:logging;${POOL_SIZE_DEFAULT}"
-    "mycelium-telegram-out;telegram-out;telegram-out;wasi:config:store|wasi:logging:logging|wasmcloud:messaging:consumer|wasi:http:outgoing-handler;${POOL_SIZE_DEFAULT}"
-    "mycelium-pairing;pairing;session-bridge;wasi:keyvalue:store|wasi:logging:logging|wasmcloud:messaging:consumer;${POOL_SIZE_DEFAULT}"
-    "mycelium-executor;executor;executor;wasi:keyvalue:store|wasi:logging:logging|wasmcloud:messaging:consumer;${POOL_SIZE_DEFAULT}"
-    "mycelium-agent;agent;agent;wasi:keyvalue:store|wasi:config:store|wasi:logging:logging|wasmcloud:messaging:consumer|wasi:http:outgoing-handler;${POOL_SIZE_AGENT}"
-    "mycelium-tools;tools;tool-runner;wasi:keyvalue:store|wasi:logging:logging|wasmcloud:messaging:consumer;${POOL_SIZE_TOOLS}"
-    "mycelium-memory;memory;memory-store;wasi:keyvalue:store|wasi:logging:logging|wasmcloud:messaging:consumer;${POOL_SIZE_DEFAULT}"
-    "mycelium-router;router;router;wasi:keyvalue:store|wasi:logging:logging|wasmcloud:messaging:consumer;${POOL_SIZE_DEFAULT}"
-    "mycelium-events;events;event-logger;wasi:keyvalue:store|wasi:logging:logging|wasmcloud:messaging:consumer;${POOL_SIZE_DEFAULT}"
+    "mycelium-telegram-poll;telegram-poll;telegram-poller;wasi:config:store|wasi:keyvalue:store|wasi:logging:logging|wasi:http:outgoing-handler|wasmcloud:messaging:consumer,handler,types:subscriptions=mycelium.telegram.poll.tick;${POOL_SIZE_DEFAULT}"
+    "mycelium-channel-router;channel-router;channel-router,agent-registry;wasi:keyvalue:store|wasi:logging:logging|wasmcloud:messaging:consumer,handler,types:subscriptions=mycelium.channel.telegram.raw;${POOL_SIZE_DEFAULT}"
+    "mycelium-telegram-out;telegram-out;telegram-out;wasi:config:store|wasi:logging:logging|wasi:http:outgoing-handler|wasmcloud:messaging:consumer,handler,types:subscriptions=mycelium.channel.telegram.out.>;${POOL_SIZE_DEFAULT}"
+    "mycelium-pairing;pairing;session-bridge;wasi:keyvalue:store|wasi:logging:logging|wasmcloud:messaging:consumer,handler,types:subscriptions=mycelium.pair.>;${POOL_SIZE_DEFAULT}"
+    "mycelium-executor;executor;executor;wasi:keyvalue:store|wasi:logging:logging|wasmcloud:messaging:consumer,handler,types:subscriptions=mycelium.task.submit,mycelium.step.result;${POOL_SIZE_DEFAULT}"
+    "mycelium-agent;agent;agent;wasi:keyvalue:store|wasi:config:store|wasi:logging:logging|wasi:http:outgoing-handler|wasmcloud:messaging:consumer,handler,types:subscriptions=mycelium.task.step.agent,mycelium.tool.result;${POOL_SIZE_AGENT}"
+    "mycelium-tools;tools;tool-runner;wasi:keyvalue:store|wasi:logging:logging|wasmcloud:messaging:consumer,handler,types:subscriptions=mycelium.tool.call;${POOL_SIZE_TOOLS}"
+    "mycelium-memory;memory;memory-store;wasi:keyvalue:store|wasi:logging:logging|wasmcloud:messaging:consumer,handler,types:subscriptions=mycelium.memory.>;${POOL_SIZE_DEFAULT}"
+    "mycelium-router;router;router;wasi:keyvalue:store|wasi:logging:logging|wasmcloud:messaging:consumer,handler,types:subscriptions=mycelium.event.>;${POOL_SIZE_DEFAULT}"
+    "mycelium-events;events;event-logger;wasi:keyvalue:store|wasi:logging:logging|wasmcloud:messaging:consumer,handler,types:subscriptions=mycelium.event.>;${POOL_SIZE_DEFAULT}"
 )
 
 case "${1:-deploy}" in
@@ -158,13 +169,19 @@ case "${1:-deploy}" in
             local_comps="${parts[2]}"
             local_ifaces="${parts[3]}"
             local_pool="${parts[4]:-1}"
+            local_extra="${parts[5]:-}"
+
+            local_service=""
+            if [[ "$local_extra" == SERVICE=* ]]; then
+                local_service="${local_extra#SERVICE=}"
+            fi
 
             IFS=',' read -ra comp_arr <<< "$local_comps"
             comps_json=$(build_component_array "$local_pool" "${comp_arr[@]}")
             IFS='|' read -ra iface_arr <<< "$local_ifaces"
             ifaces_json=$(build_iface_array "${iface_arr[@]}")
 
-            deploy_workload "$local_wid" "$local_name" "$comps_json" "$ifaces_json"
+            deploy_workload "$local_wid" "$local_name" "$comps_json" "$ifaces_json" "$local_service"
         done
         ;;
     undeploy)
@@ -173,9 +190,9 @@ case "${1:-deploy}" in
             nats --server "$NATS_URL" req "runtime.host.${HOST_ID}.workload.stop" "{\"workload_id\":\"${wid}\"}" --timeout 10s >/dev/null 2>&1 || true
             echo "stopped $wid"
         done
-        # Also stop any legacy single-component workloads
-        for name in gateway executor agent tool-runner memory-store conversation-store router event-logger telegram-gateway session-bridge; do
-            nats --server "$NATS_URL" req "runtime.host.${HOST_ID}.workload.stop" "{\"workload_id\":\"mycelium-${name}\"}" --timeout 5s >/dev/null 2>&1 || true
+        # Also stop legacy workload ids (renamed or removed)
+        for legacy in mycelium-gateway mycelium-conversation-store mycelium-telegram-in mycelium-telegram-gateway; do
+            nats --server "$NATS_URL" req "runtime.host.${HOST_ID}.workload.stop" "{\"workload_id\":\"${legacy}\"}" --timeout 5s >/dev/null 2>&1 || true
         done
         ;;
     status)

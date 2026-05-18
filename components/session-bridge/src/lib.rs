@@ -128,17 +128,17 @@ impl exports::mycelium::pairing::pairing::Guest for Component {
             let _ = bucket.delete(&code_key);
             return Err(DomainError::Validation("code expired".into()));
         }
-        // Create a conversation via mycelium:conversation/conversations
-        let conv = mycelium::conversation::conversations::create(
-            &pending.agent_id,
-            Some(&format!("CLI:{}↔chat:{chat_id}", pending.session_id)),
-        )
-        .map_err(|e| DomainError::Backend(format!("conv create: {e:?}")))?;
+        // Locally-allocated conversation id. The first user message that lands
+        // on this conversation triggers create via the regular conversation-store
+        // path; here we only need a stable identifier to bind the pairing.
+        let r1 = wasi::random::random::get_random_u64();
+        let r2 = wasi::random::random::get_random_u64();
+        let conversation_id = format!("{r1:016x}{r2:016x}");
 
         let info = PairInfoJson {
             session_id: pending.session_id.clone(),
             chat_id: chat_id.clone(),
-            conversation_id: conv.id,
+            conversation_id,
             paired_at: now_secs(),
         };
         write_json(&bucket, &format!("pair/session/{}", info.session_id), &info)?;

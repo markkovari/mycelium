@@ -13,8 +13,7 @@ just wizard
 # Wizard prompts:
 > Bot name: yogabot
 > Greeting: "Hi! I help with class times and signups."
-> Telegram bot token: <paste>
-> Telegram webhook secret: <auto-generate>
+> Telegram bot token: <paste from @BotFather>
 > Model: [1] qwen-fast  [2] gpt-4o-mini  [3] claude-haiku
 > Pick: 2
 > Tools to enable: [x] calendar [x] email-confirmation [ ] web-search
@@ -23,9 +22,9 @@ just wizard
 
 Wizard does under the hood:
 - `POST /agents` with chosen config
-- writes `telegram.bot_token` and `telegram.webhook_secret` to wasi:config
-- runs `setWebhook` against Telegram API pointing at `https://<host>/webhook`
-- restarts `mycelium-telegram-in` to pick up config
+- writes `telegram.bot_token` to wasi:config (used by both `telegram-poller` and `telegram-out`)
+- restarts `mycelium-telegram-poll` to pick up the token
+- **no public URL needed** — long polling, outbound HTTP only. Works behind NAT, on a Pi, on a laptop.
 
 ## Branches
 

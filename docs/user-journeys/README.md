@@ -67,10 +67,16 @@ Three audiences. End users chat with agents. Operators run them. Builders extend
 | Multi-language | 10, 24, 26 |
 | Accessibility | 12 |
 
+## Telegram ingress: long polling (default)
+
+`mycelium-telegram-poll` runs `telegram-poller` as a Service component that issues `getUpdates` long-polls every ~2s. Outbound HTTP only. **No public URL needed.** Works behind NAT, on a Pi, on a laptop. Drop ngrok / Cloudflare Tunnel / custom domain from the requirements list.
+
+Webhook variant (`mycelium-telegram-in` + `telegram-gateway`) was removed because v2 host's HTTP-exporter limitation blocked the bot from publishing to NATS, and it forced public-URL setup. Polling solves both at once. Historical commits retain the webhook code if needed.
+
 ## Conventions
 
 - HTTP examples send `Host: localhost` to hit `mycelium-api`.
-- Telegram examples send `Host: telegram.localhost` to hit `mycelium-telegram-in` (simulated webhook payloads).
+- Telegram chat events arrive on NATS subject `mycelium.channel.in` (published by the poller).
 - `${BOT}` is the BotFather token of the operator's Telegram bot.
 - `${CHAT}` is the user's `chat_id` in Telegram terms.
 - KV bucket names bare (`mycelium-agent-config`, `mycelium-channel-sessions`, etc.).

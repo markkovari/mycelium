@@ -51,6 +51,7 @@ create_kv mycelium-agent-config
 create_kv mycelium-router-rules
 create_kv mycelium-channel-sessions
 create_kv mycelium-events-journal  1
+create_kv mycelium-telegram-poller-state
 
 echo ""
 echo "Done. Run \`wash app deploy wadm/local.yaml\` to start components."

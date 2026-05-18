@@ -43,21 +43,15 @@ impl exports::wasmcloud::messaging::handler::Guest for Component {
             Err(e) => return Err(format!("decode tool call: {e}")),
         };
 
-        let call = mycelium::types::types::ToolCallRequest {
-            call_id: req.call_id.clone(),
-            tool_id: req.tool_id.clone(),
-            args_json: req.args_json.clone(),
-        };
-
-        let result = match mycelium::tool::tool_registry::execute(&call) {
-            Ok(r) => ToolCallResJson {
-                call_id: r.call_id,
-                tool_id: r.tool_id,
-                output_json: r.output_json,
-                is_error: r.is_error,
-            },
-            Err(e) => build_err(&req.call_id, &req.tool_id, format!("{e:?}")),
-        };
+        // No tool registry wired yet. Every tool call returns a clear error so
+        // the caller can choose to retry or abort the agent run. Future work:
+        // register a `tool-registry` component in this workload and route via
+        // WIT — see `docs/user-journeys/build-researcher.md` for the loop shape.
+        let result = build_err(
+            &req.call_id,
+            &req.tool_id,
+            "no tool registry configured".to_string(),
+        );
 
         let body = serde_json::to_vec(&result).map_err(|e| e.to_string())?;
         let out = wasmcloud::messaging::types::BrokerMessage {

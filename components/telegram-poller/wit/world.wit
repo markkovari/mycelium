@@ -1,0 +1,31 @@
+package mycelium:telegram-poller@0.1.0;
+
+// Telegram transport adapter. Pure I/O.
+//
+// Responsibility: drain the Telegram Bot API (long-poll getUpdates) and
+// publish every raw update to `mycelium.channel.telegram.raw` on NATS.
+// Persists the update_id offset so restarts don't re-process old messages.
+//
+// Explicitly NOT a responsibility:
+//   - parsing `/commands`  → channel-router
+//   - normalising payloads → channel-router
+//   - business logic       → downstream agents
+//
+// Drive: self-tick. The component exports wasmcloud:messaging/handler and
+// subscribes to a dedicated tick subject. Each invocation does one poll then
+// publishes the next tick. Bootstrap: deploy script publishes the first tick.
+world telegram-poller {
+    export wasmcloud:messaging/handler@0.2.0;
+
+    import wasi:http/outgoing-handler@0.2.2;
+    import wasi:http/types@0.2.2;
+    import wasi:io/streams@0.2.2;
+    import wasi:io/poll@0.2.2;
+    import wasi:keyvalue/store@0.2.0-draft;
+    import wasi:config/store@0.2.0-rc.1;
+    import wasi:clocks/wall-clock@0.2.2;
+    import wasi:clocks/monotonic-clock@0.2.2;
+    import wasi:logging/logging@0.1.0-draft;
+
+    import wasmcloud:messaging/consumer@0.2.0;
+}

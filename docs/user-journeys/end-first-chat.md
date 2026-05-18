@@ -2,7 +2,7 @@
 
 **Persona**: Mara. Found bot via friend. Never used an AI assistant.
 **Goal**: Send first message, get useful reply, not feel lost.
-**Primitives**: Telegram webhook → telegram-gateway → (eventually) telegram-out reply.
+**Primitives**: telegram-poller (long-poll) reads `/start` from Telegram → publishes `mycelium.channel.in` → telegram-out reply.
 
 ## Setup (operator side, once)
 
@@ -11,13 +11,14 @@ Operator gives Mara the bot URL: `t.me/mycelium_demo_bot`.
 ## Happy path
 
 1. Mara opens chat, taps "Start".
-2. Telegram sends `/start` to webhook.
+2. telegram-poller's next `getUpdates` (within ~2s) picks up `/start`.
 3. Bot replies with a welcome card listing 3 example prompts.
 4. Mara taps one ("Help me plan dinner").
-5. Within 4s a reply: "Sure — what's in your fridge?"
+5. Within 4-6s a reply: "Sure — what's in your fridge?"
 
 Under the hood:
-- Webhook `POST /webhook` (Host: telegram.localhost) → telegram-gateway parses.
+- telegram-poller (Service component, runs forever in `mycelium-telegram-poll`) issues `getUpdates` long-polls every ~2s.
+- Each update is published on `mycelium.channel.in` (NATS).
 - Operator's onboarding agent receives a step.
 - Reply goes back via `mycelium.channel.telegram.out.${CHAT}` → telegram-out → Telegram sendMessage.
 

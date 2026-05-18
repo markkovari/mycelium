@@ -28,8 +28,9 @@ jobs:
           - { dir: conversation-store,  file: conversation_store }
           - { dir: router,              file: router }
           - { dir: event-logger,        file: event_logger }
-          - { dir: telegram-gateway,    file: telegram_gateway }
+          - { dir: telegram-poller,     file: telegram_poller }
           - { dir: telegram-out,        file: telegram_out }
+          - { dir: channel-router,      file: channel_router }
           - { dir: session-bridge,      file: session_bridge }
           - { dir: agent-registry,      file: agent_registry }
           - { dir: task-publisher,      file: task_publisher }

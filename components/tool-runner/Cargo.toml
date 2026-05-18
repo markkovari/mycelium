@@ -31,6 +31,5 @@ world = "tool-runner"
 "wasi:clocks" = { path = "wit/deps/wasi-clocks-0.2.2" }
 "wasmcloud:messaging" = { path = "wit/deps/wasmcloud-messaging-0.2.0" }
 "mycelium:types" = { path = "wit/deps/mycelium-types-0.1.0" }
-"mycelium:tool" = { path = "wit/deps/mycelium-tool-0.1.0" }
 "wasi:cli" = { path = "wit/deps/wasi-cli-0.2.2" }
 "wasi:random" = { path = "wit/deps/wasi-random-0.2.2" }

@@ -7,7 +7,7 @@ oci_registry := env_var_or_default("OCI_REGISTRY", "localhost:5001/mycelium")
 image_tag    := env_var_or_default("IMAGE_TAG", "dev")
 http_addr    := env_var_or_default("HTTP_ADDR", "0.0.0.0:8080")
 
-components := "gateway executor agent tool-runner memory-store conversation-store router event-logger telegram-gateway telegram-out session-bridge agent-registry task-publisher"
+components := "gateway executor agent tool-runner memory-store conversation-store router event-logger telegram-poller telegram-out channel-router session-bridge agent-registry task-publisher"
 
 default:
     @just --list
@@ -77,8 +77,9 @@ push-oci:
             memory-store) file=memory_store ;;
             conversation-store) file=conversation_store ;;
             event-logger) file=event_logger ;;
-            telegram-gateway) file=telegram_gateway ;;
+            telegram-poller) file=telegram_poller ;;
             telegram-out) file=telegram_out ;;
+            channel-router) file=channel_router ;;
             session-bridge) file=session_bridge ;;
             agent-registry) file=agent_registry ;;
             task-publisher) file=task_publisher ;;
@@ -134,6 +135,14 @@ fetch-wit-deps:
     wkg wit fetch -d "$tmpdir"
     mkdir -p wit/deps
     cp -r "$tmpdir/deps/". wit/deps/
+    # Overlay hand-maintained packages (wkg can't fetch these correctly):
+    # - wasmcloud:messaging  (registry version has wrong field order; v2 host
+    #   plugin's canonical layout differs from what's published)
+    # - wasi:cli/run         (wkg fetch of wasi:cli omits the `run` interface)
+    if [ -d wit/local-deps ]; then
+        cp -R wit/local-deps/. wit/deps/
+        echo "Overlaid wit/local-deps/ onto wit/deps/"
+    fi
     echo "Fetched external WIT deps into wit/deps/"
 
 init-wit-deps: fetch-wit-deps
