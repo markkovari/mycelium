@@ -14,7 +14,7 @@
 set -euo pipefail
 
 # ── Defaults ─────────────────────────────────────────────────────────────────
-MYCELIUM_VERSION="${MYCELIUM_VERSION:-latest}"
+MYCELIUM_VERSION="${MYCELIUM_VERSION:-dev}"
 MYCELIUM_PREFIX="${MYCELIUM_PREFIX:-/usr/local}"
 MYCELIUM_DATA_DIR="${MYCELIUM_DATA_DIR:-/var/lib/mycelium}"
 MYCELIUM_CONF_DIR="${MYCELIUM_CONF_DIR:-/etc/mycelium}"
