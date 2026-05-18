@@ -90,6 +90,31 @@ impl TgClient {
         }
         Ok(())
     }
+
+    /// POST `setMessageReaction`. Replaces any existing reactions from this bot.
+    /// `emoji` must be one of the values Telegram allows (👍 👎 ❤ 🔥 🥰 👀 …).
+    pub fn set_reaction(&self, chat_id: i64, message_id: i64, emoji: &str) -> Result<(), String> {
+        let url = format!(
+            "https://api.telegram.org/bot{}/setMessageReaction",
+            self.token
+        );
+        let body = serde_json::json!({
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "reaction": [{"type": "emoji", "emoji": emoji}],
+            "is_big": false,
+        });
+        let body_bytes = serde_json::to_vec(&body).map_err(|e| e.to_string())?;
+        let resp = http_post_json(&url, body_bytes)?;
+        let parsed: TgResponse<serde_json::Value> =
+            serde_json::from_slice(&resp).map_err(|e| format!("decode: {e}"))?;
+        if !parsed.ok {
+            return Err(parsed
+                .description
+                .unwrap_or_else(|| "telegram returned ok=false".to_string()));
+        }
+        Ok(())
+    }
 }
 
 fn http_get(url: &str) -> Result<Vec<u8>, String> {

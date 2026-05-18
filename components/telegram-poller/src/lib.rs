@@ -88,11 +88,27 @@ fn tick_once() {
     let client = TgClient::new(token);
     let offset = read_offset();
 
+    let ack_emoji = cfg("telegram.ack_emoji").unwrap_or_else(|| "\u{1F440}".to_string()); // 👀
+    let ack_enabled = cfg("telegram.ack_emoji_disabled")
+        .map(|v| matches!(v.as_str(), "1" | "true" | "yes"))
+        .unwrap_or(false)
+        == false;
+
     match client.get_updates(offset, timeout_s) {
         Ok(updates) => {
             for u in &updates {
                 let bytes = serde_json::to_vec(u).unwrap_or_default();
                 publish(RAW_SUBJECT, bytes);
+                if ack_enabled {
+                    if let Some(msg) = u.message.as_ref() {
+                        if let Err(e) = client.set_reaction(msg.chat.id, msg.message_id, &ack_emoji) {
+                            log(
+                                wasi::logging::logging::Level::Debug,
+                                &format!("set_reaction failed: {e}"),
+                            );
+                        }
+                    }
+                }
             }
             if let Some(max) = updates.iter().map(|u| u.update_id).max() {
                 write_offset(max + 1);
