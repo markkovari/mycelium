@@ -238,21 +238,28 @@ else
     log "Skipping deploy (SKIP_DEPLOY=1 or nats CLI missing)"
 fi
 
+# ── Install mycelium CLI ─────────────────────────────────────────────────────
+log "Installing mycelium CLI to $MYCELIUM_PREFIX/bin/mycelium"
+tmp_cli=$(mktemp)
+curl -fsSL "${REPO_RAW}/infra/mycelium-cli.sh" -o "$tmp_cli"
+$SUDO install -m 0755 "$tmp_cli" "$MYCELIUM_PREFIX/bin/mycelium"
+rm -f "$tmp_cli"
+
 # ── Done ─────────────────────────────────────────────────────────────────────
 cat <<'EOF'
 
 Mycelium installed.
 
-Next:
-  1. Add your tokens to /etc/mycelium/host.env (telegram.bot_token, llm.api_key, …)
-  2. systemctl restart mycelium-host
-  3. Visit http://<this-host>:8080/health
-  4. Register an agent:
-       curl -X POST http://localhost:8080/agents \
-         -H 'host: localhost' -H 'content-type: application/json' \
-         -d '{"id":"alice","name":"Alice","system_prompt":"Be terse.","model":"gpt-4o-mini","tools":[],"max_steps":4}'
+Quick start:
+  mycelium provider gemini AIza...           # or: openai, anthropic, ollama
+  mycelium token telegram 123:ABC            # (optional) wire up bot
+  mycelium agent create alice --prompt='Be terse.'
+  mycelium chat alice 'hello'
+  mycelium status
+  mycelium logs host
 
-Logs:
-  journalctl -u mycelium-host -f
-  journalctl -u mycelium-nats -f
+Files:
+  /etc/mycelium/host.env       (tokens; chmod 600)
+  /var/lib/mycelium            (wash state + NATS data)
+  /etc/systemd/system/mycelium-{nats,host}.service
 EOF
