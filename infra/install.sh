@@ -25,6 +25,7 @@ SKIP_PULL="${SKIP_PULL:-0}"
 
 WASH_VERSION="${WASH_VERSION:-2.1.0}"
 NATS_VERSION="${NATS_VERSION:-2.10.20}"
+NATS_CLI_VERSION="${NATS_CLI_VERSION:-0.1.5}"
 
 COMPONENTS=(
     gateway executor agent tool-runner memory-store conversation-store
@@ -85,39 +86,70 @@ else
     log "nats-server already installed: $(command -v nats-server)"
 fi
 
+# ── nats CLI ─────────────────────────────────────────────────────────────────
+if ! command -v nats >/dev/null 2>&1; then
+    log "Installing nats CLI $NATS_CLI_VERSION"
+    tmp=$(mktemp -d)
+    url="https://github.com/nats-io/natscli/releases/download/v${NATS_CLI_VERSION}/nats-${NATS_CLI_VERSION}-linux-${ARCH_TAR}.zip"
+    if curl -fsSL "$url" -o "$tmp/nats.zip"; then
+        if command -v unzip >/dev/null 2>&1; then
+            unzip -q "$tmp/nats.zip" -d "$tmp"
+            $SUDO install -m 0755 "$tmp"/nats-*/nats "$MYCELIUM_PREFIX/bin/nats"
+        else
+            warn "  unzip not installed; skipping nats CLI install (apt install unzip and rerun)"
+        fi
+    else
+        warn "  failed to download nats CLI; install manually from https://github.com/nats-io/natscli/releases"
+    fi
+    rm -rf "$tmp"
+else
+    log "nats CLI already installed: $(command -v nats)"
+fi
+
 # ── wash CLI ─────────────────────────────────────────────────────────────────
 if ! command -v wash >/dev/null 2>&1; then
     log "Installing wash $WASH_VERSION via the official installer"
     if ! curl -fsSL https://wasmcloud.com/sh | bash; then
         die "wash install failed; try installing manually from https://github.com/wasmCloud/wash/releases"
     fi
-    # The installer drops wash in ~/.wash/bin (current) or ~/.wasmcloud (older); locate and symlink.
+    # The installer drops wash in ~/.wash/bin (current) or ~/.wasmcloud (older); copy
+    # to $MYCELIUM_PREFIX/bin so systemd (with ProtectHome=true) can exec it.
+    wash_src=""
     for cand in "$HOME/.wash/bin/wash" "$HOME/.wasmcloud/bin/wash" "/usr/local/bin/wash"; do
-        if [ -x "$cand" ]; then
-            export PATH="$(dirname "$cand"):$PATH"
-            $SUDO ln -sf "$cand" "$MYCELIUM_PREFIX/bin/wash"
-            break
-        fi
+        if [ -x "$cand" ]; then wash_src="$cand"; break; fi
     done
-    if ! command -v wash >/dev/null 2>&1; then
-        die "wash installed but binary not found in ~/.wash/bin or ~/.wasmcloud/bin"
+    [ -z "$wash_src" ] && die "wash installed but binary not found in ~/.wash/bin or ~/.wasmcloud/bin"
+    if [ "$wash_src" != "$MYCELIUM_PREFIX/bin/wash" ]; then
+        $SUDO install -m 0755 "$wash_src" "$MYCELIUM_PREFIX/bin/wash"
     fi
+    export PATH="$MYCELIUM_PREFIX/bin:$PATH"
 else
     log "wash already installed: $(command -v wash)"
 fi
 
-# ── Pull components ──────────────────────────────────────────────────────────
+# ── Verify registry reachability ─────────────────────────────────────────────
+# wash host pulls components on demand into --oci-cache-dir. We only verify
+# that the registry is reachable + each manifest exists at the requested tag.
 if [ "$SKIP_PULL" != "1" ]; then
-    log "Pulling Mycelium components from ${GHCR_REGISTRY}/${GHCR_OWNER}/mycelium/*"
+    log "Probing ${GHCR_REGISTRY}/${GHCR_OWNER}/mycelium/*:${MYCELIUM_VERSION}"
+    ok=0; bad=""
     for c in "${COMPONENTS[@]}"; do
-        img="${GHCR_REGISTRY}/${GHCR_OWNER}/mycelium/${c}:${MYCELIUM_VERSION}"
-        log "  pull $img"
-        if ! wash oci pull "$img" --target "$MYCELIUM_DATA_DIR/oci-cache" 2>/dev/null; then
-            warn "    failed (continuing; image may not be public yet)"
-        fi
+        scope="repository:${GHCR_OWNER}/mycelium/${c}:pull"
+        tok=$(curl -fsSL "https://${GHCR_REGISTRY}/token?scope=${scope}" 2>/dev/null \
+              | awk -F'"' '/token/ {for(i=1;i<=NF;i++) if($i=="token"){print $(i+2); exit}}')
+        code=$(curl -sI -o /dev/null -w '%{http_code}' \
+               -H "Authorization: Bearer ${tok}" \
+               -H 'Accept: application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json' \
+               "https://${GHCR_REGISTRY}/v2/${GHCR_OWNER}/mycelium/${c}/manifests/${MYCELIUM_VERSION}")
+        if [ "$code" = "200" ]; then ok=$((ok+1)); else bad="$bad ${c}(${code})"; fi
     done
+    log "  ${ok}/${#COMPONENTS[@]} manifests reachable"
+    if [ -n "$bad" ]; then
+        warn "  unreachable:$bad"
+        warn "  host will retry on first deploy; check package visibility on ghcr.io if persistent"
+    fi
 else
-    log "Skipping OCI pull (SKIP_PULL=1)"
+    log "Skipping registry probe (SKIP_PULL=1)"
 fi
 
 # ── Auto-tune pool sizes ─────────────────────────────────────────────────────
