@@ -331,10 +331,11 @@ struct Component;
 
 impl exports::wasmcloud::messaging::handler::Guest for Component {
     fn handle_message(msg: wasmcloud::messaging::types::BrokerMessage) -> Result<(), String> {
-        match msg.subject.as_str() {
-            TELEGRAM_RAW => handle_telegram_raw(&msg.body),
-            STEP_RESULT => handle_step_result(&msg.body),
-            _ => {}
+        // step.result is consumed by executor (it sends the Telegram reply
+        // inline since wash 2.1.0 won't deliver the same subject to two
+        // distinct workloads reliably).
+        if msg.subject == TELEGRAM_RAW {
+            handle_telegram_raw(&msg.body);
         }
         Ok(())
     }

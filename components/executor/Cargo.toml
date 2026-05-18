@@ -34,3 +34,5 @@ world = "executor"
 "mycelium:conversation" = { path = "wit/deps/mycelium-conversation-0.1.0" }
 "mycelium:executor" = { path = "wit/deps/mycelium-executor-0.1.0" }
 "wasi:io" = { path = "wit/deps/wasi-io-0.2.2" }
+"wasi:http" = { path = "wit/deps/wasi-http-0.2.2" }
+"wasi:cli" = { path = "wit/deps/wasi-cli-0.2.2" }

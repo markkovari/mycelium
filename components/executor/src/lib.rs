@@ -72,6 +72,64 @@ fn load_state(id: &str) -> Result<Option<TaskStateJson>, String> {
     }
 }
 
+fn cfg(key: &str) -> Option<String> {
+    wasi::config::store::get(key).ok().flatten()
+}
+
+#[derive(Deserialize)]
+struct PendingTask {
+    channel: String,
+    chat_id: String,
+}
+
+fn load_pending(task_id: &str) -> Option<PendingTask> {
+    let bucket = wasi::keyvalue::store::open("mycelium-channel-pending").ok()?;
+    let bytes = bucket.get(task_id).ok().flatten()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+fn delete_pending(task_id: &str) -> Result<(), String> {
+    let bucket = wasi::keyvalue::store::open("mycelium-channel-pending")
+        .map_err(|e| format!("{e:?}"))?;
+    bucket.delete(task_id).map_err(|e| format!("{e:?}"))
+}
+
+fn telegram_send(token: &str, chat_id: &str, text: &str) -> Result<(), String> {
+    use wasi::http::outgoing_handler;
+    use wasi::http::types::{Fields, Method, OutgoingBody, OutgoingRequest, Scheme};
+    let body = serde_json::json!({"chat_id": chat_id, "text": text});
+    let body_bytes = serde_json::to_vec(&body).map_err(|e| e.to_string())?;
+    let headers = Fields::new();
+    headers
+        .set("content-type", &[b"application/json".to_vec()])
+        .map_err(|e| format!("{e:?}"))?;
+    let req = OutgoingRequest::new(headers);
+    req.set_method(&Method::Post).map_err(|_| "method".to_string())?;
+    req.set_scheme(Some(&Scheme::Https)).map_err(|_| "scheme".to_string())?;
+    req.set_authority(Some("api.telegram.org"))
+        .map_err(|_| "authority".to_string())?;
+    req.set_path_with_query(Some(&format!("/bot{token}/sendMessage")))
+        .map_err(|_| "path".to_string())?;
+    let outgoing = req.body().map_err(|_| "body".to_string())?;
+    {
+        let stream = outgoing.write().map_err(|_| "stream".to_string())?;
+        for chunk in body_bytes.chunks(4096) {
+            stream
+                .blocking_write_and_flush(chunk)
+                .map_err(|e| format!("{e:?}"))?;
+        }
+    }
+    OutgoingBody::finish(outgoing, None).map_err(|e| format!("{e:?}"))?;
+    let fut = outgoing_handler::handle(req, None).map_err(|e| format!("{e:?}"))?;
+    fut.subscribe().block();
+    let _resp = fut
+        .get()
+        .ok_or("no resp")?
+        .map_err(|_| "consumed".to_string())?
+        .map_err(|e| format!("{e:?}"))?;
+    Ok(())
+}
+
 fn publish(subject: &str, body: Vec<u8>) -> Result<(), String> {
     wasmcloud::messaging::consumer::publish(&wasmcloud::messaging::types::BrokerMessage {
         subject: subject.to_string(),
@@ -110,6 +168,11 @@ impl exports::wasmcloud::messaging::handler::Guest for Component {
             "mycelium.step.result" => {
                 let res: StepResult =
                     serde_json::from_slice(&body).map_err(|e| format!("decode step: {e}"))?;
+                let reply_text = res
+                    .output
+                    .clone()
+                    .filter(|s| !s.is_empty())
+                    .or_else(|| res.error.clone().map(|e| format!("(error: {e})")));
                 if let Some(mut state) = load_state(&res.task_id)? {
                     state.status = if res.error.is_some() {
                         "failed"
@@ -120,6 +183,17 @@ impl exports::wasmcloud::messaging::handler::Guest for Component {
                     state.output = res.output;
                     state.error = res.error;
                     save_state(&state)?;
+                }
+                if let Some(text) = reply_text {
+                    if let Some(pending) = load_pending(&res.task_id) {
+                        if pending.channel == "telegram" {
+                            if let Some(token) = cfg("telegram.bot_token") {
+                                let _ =
+                                    telegram_send(&token, &pending.chat_id, &text);
+                            }
+                        }
+                        let _ = delete_pending(&res.task_id);
+                    }
                 }
                 Ok(())
             }
