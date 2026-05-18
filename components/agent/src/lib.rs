@@ -96,16 +96,14 @@ fn parse_url(s: &str) -> Result<ParsedUrl, String> {
     })
 }
 
-fn call_llm(
+fn do_request(
     model: &str,
-    endpoint: &str,
-    api_key: Option<String>,
+    url: &ParsedUrl,
+    api_key: Option<&str>,
     prompt: &str,
-) -> Result<String, String> {
+) -> Result<(u16, Vec<u8>), String> {
     use wasi::http::outgoing_handler;
     use wasi::http::types::{Fields, Method, OutgoingBody, OutgoingRequest};
-
-    let url = parse_url(endpoint)?;
 
     let body = json!({
         "model": model,
@@ -154,6 +152,7 @@ fn call_llm(
         .map_err(|_| "response already consumed".to_string())?
         .map_err(|e| format!("recv: {e:?}"))?;
 
+    let status = resp.status();
     let incoming_body = resp.consume().map_err(|_| "no body".to_string())?;
     let stream = incoming_body
         .stream()
@@ -167,14 +166,65 @@ fn call_llm(
         }
     }
     drop(stream);
+    Ok((status, buf))
+}
 
-    let parsed: Value = serde_json::from_slice(&buf).map_err(|e| e.to_string())?;
-    let content = parsed
-        .pointer("/choices/0/message/content")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-    Ok(content)
+fn parse_retry_delay_seconds(body: &[u8]) -> Option<u64> {
+    let parsed: Value = serde_json::from_slice(body).ok()?;
+    let err = match &parsed {
+        Value::Array(a) => a.first()?.get("error")?,
+        Value::Object(_) => parsed.get("error")?,
+        _ => return None,
+    };
+    let details = err.get("details")?.as_array()?;
+    for d in details {
+        if let Some(rd) = d.get("retryDelay").and_then(|v| v.as_str()) {
+            let n: f64 = rd.trim_end_matches('s').parse().ok()?;
+            return Some((n.ceil() as u64).max(1));
+        }
+    }
+    None
+}
+
+fn sleep_seconds(s: u64) {
+    let ns = s.saturating_mul(1_000_000_000);
+    let p = wasi::clocks::monotonic_clock::subscribe_duration(ns);
+    p.block();
+}
+
+fn call_llm(
+    model: &str,
+    endpoint: &str,
+    api_key: Option<String>,
+    prompt: &str,
+) -> Result<String, String> {
+    const MAX_ATTEMPTS: u32 = 4;
+    const MAX_DELAY_S: u64 = 60;
+    let url = parse_url(endpoint)?;
+    let key = api_key.as_deref();
+    let mut attempt = 0u32;
+    loop {
+        attempt += 1;
+        let (status, body) = do_request(model, &url, key, prompt)?;
+        if status == 200 {
+            let parsed: Value = serde_json::from_slice(&body).map_err(|e| e.to_string())?;
+            return Ok(parsed
+                .pointer("/choices/0/message/content")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string());
+        }
+        let retryable = status == 429 || (500..600).contains(&status);
+        if retryable && attempt < MAX_ATTEMPTS {
+            let delay = parse_retry_delay_seconds(&body)
+                .unwrap_or_else(|| 1u64 << (attempt - 1))
+                .min(MAX_DELAY_S);
+            sleep_seconds(delay);
+            continue;
+        }
+        let snippet = String::from_utf8_lossy(&body);
+        return Err(format!("HTTP {status}: {}", &snippet[..snippet.len().min(400)]));
+    }
 }
 
 struct Component;
