@@ -15,6 +15,7 @@ set -euo pipefail
 
 # ── Defaults ─────────────────────────────────────────────────────────────────
 MYCELIUM_VERSION="${MYCELIUM_VERSION:-dev}"
+MYCELIUM_REF="${MYCELIUM_REF:-main}"     # git ref for fetching unit files + helper scripts
 MYCELIUM_PREFIX="${MYCELIUM_PREFIX:-/usr/local}"
 MYCELIUM_DATA_DIR="${MYCELIUM_DATA_DIR:-/var/lib/mycelium}"
 MYCELIUM_CONF_DIR="${MYCELIUM_CONF_DIR:-/etc/mycelium}"
@@ -22,6 +23,7 @@ GHCR_OWNER="${GHCR_OWNER:-markkovari}"
 GHCR_REGISTRY="${GHCR_REGISTRY:-ghcr.io}"
 SKIP_SYSTEMD="${SKIP_SYSTEMD:-0}"
 SKIP_PULL="${SKIP_PULL:-0}"
+SKIP_DEPLOY="${SKIP_DEPLOY:-0}"
 
 WASH_VERSION="${WASH_VERSION:-2.1.0}"
 NATS_VERSION="${NATS_VERSION:-2.10.20}"
@@ -191,12 +193,15 @@ TOOLS_POOL_SIZE=$tools_pool
 EOF
 $SUDO chmod 600 "$MYCELIUM_CONF_DIR/host.env"
 
+# Helper to fetch repo files at the pinned ref. Uses codeload.github.com which
+# is cache-busted by the ref segment, unlike raw.githubusercontent.com.
+REPO_RAW="https://raw.githubusercontent.com/${GHCR_OWNER}/mycelium/${MYCELIUM_REF}"
+
 # ── systemd units ────────────────────────────────────────────────────────────
 if [ "$SKIP_SYSTEMD" != "1" ] && command -v systemctl >/dev/null 2>&1; then
-    log "Installing systemd units"
-    BASE_URL="https://raw.githubusercontent.com/${GHCR_OWNER}/mycelium/main/infra/systemd"
+    log "Installing systemd units (ref=${MYCELIUM_REF})"
     for unit in mycelium-nats.service mycelium-host.service; do
-        curl -fsSL "${BASE_URL}/${unit}" | $SUDO tee "/etc/systemd/system/${unit}" >/dev/null
+        curl -fsSL "${REPO_RAW}/infra/systemd/${unit}" | $SUDO tee "/etc/systemd/system/${unit}" >/dev/null
     done
     $SUDO systemctl daemon-reload
     $SUDO systemctl enable --now mycelium-nats.service
@@ -211,13 +216,26 @@ fi
 # ── Bootstrap NATS streams + KV ──────────────────────────────────────────────
 if command -v nats >/dev/null 2>&1; then
     log "Initialising NATS streams and KV buckets"
-    BASE_URL="https://raw.githubusercontent.com/${GHCR_OWNER}/mycelium/main/infra"
     tmp_init=$(mktemp)
-    curl -fsSL "${BASE_URL}/init-streams.sh" -o "$tmp_init"
+    curl -fsSL "${REPO_RAW}/infra/init-streams.sh" -o "$tmp_init"
     NATS_URL="nats://127.0.0.1:4222" bash "$tmp_init" || warn "init-streams.sh failed; run manually after fixing"
     rm -f "$tmp_init"
 else
-    warn "nats CLI not installed; skip stream init. Install via: go install github.com/nats-io/natscli/nats@latest"
+    warn "nats CLI not installed; skip stream init."
+fi
+
+# ── Deploy workloads to the running host ─────────────────────────────────────
+if [ "$SKIP_DEPLOY" != "1" ] && command -v nats >/dev/null 2>&1; then
+    log "Deploying workloads (waiting up to 30s for host heartbeat)"
+    tmp_dep=$(mktemp)
+    curl -fsSL "${REPO_RAW}/infra/deploy-v2.sh" -o "$tmp_dep"
+    OCI_REGISTRY="${GHCR_REGISTRY}/${GHCR_OWNER}/mycelium" \
+    IMAGE_TAG="${MYCELIUM_VERSION}" \
+    NATS_URL="nats://127.0.0.1:4222" \
+    bash "$tmp_dep" || warn "deploy-v2.sh failed; rerun manually after fixing"
+    rm -f "$tmp_dep"
+else
+    log "Skipping deploy (SKIP_DEPLOY=1 or nats CLI missing)"
 fi
 
 # ── Done ─────────────────────────────────────────────────────────────────────
