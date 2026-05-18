@@ -223,9 +223,9 @@ print(json.dumps({
     sleep 0.5
     nats --server="$NATS_URL" pub mycelium.task.submit "$task_body" >/dev/null
 
-    log "waiting for mycelium.step.result (up to 30s)…"
+    log "waiting for mycelium.step.result (up to 60s)…"
     local i=0
-    while [ $i -lt 30 ] && kill -0 $sub_pid 2>/dev/null; do
+    while [ $i -lt 60 ] && kill -0 $sub_pid 2>/dev/null; do
         sleep 1; i=$((i+1))
     done
     kill $sub_pid 2>/dev/null
