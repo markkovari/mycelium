@@ -204,11 +204,11 @@ fn handle_telegram_raw(body: &[u8]) {
         return;
     };
 
-    // Show typing indicator so the user knows the bot is thinking.
-    publish(
-        &format!("mycelium.channel.telegram.action.{chat_id}"),
-        b"{\"action\":\"typing\"}".to_vec(),
-    );
+    // Show typing indicator via direct Telegram API (wash messaging plugin
+    // doesn't reliably route to telegram-out, so we call Telegram inline).
+    if let Some(token) = cfg("telegram.bot_token") {
+        let _ = telegram_chat_action(&token, &chat_id, "typing");
+    }
 
     let task_id = random_uuid_v4();
     let conv_id = random_uuid_v4();
@@ -245,15 +245,66 @@ fn handle_step_result(body: &[u8]) {
         .unwrap_or_else(|| "(no response)".to_string());
 
     if pending.channel == "telegram" {
-        let reply = json!({"recipient_id": pending.chat_id, "text": text});
-        if let Ok(bytes) = serde_json::to_vec(&reply) {
-            publish(
-                &format!("mycelium.channel.telegram.out.{}", pending.chat_id),
-                bytes,
+        // wash 2.1.0 messaging plugin does not deliver pubs to telegram-out's
+        // wildcard subscription, so call Telegram directly here.
+        if let Some(token) = cfg("telegram.bot_token") {
+            if let Err(e) = telegram_send(&token, &pending.chat_id, &text) {
+                log(
+                    wasi::logging::logging::Level::Warn,
+                    &format!("telegram send failed: {e}"),
+                );
+            }
+        } else {
+            log(
+                wasi::logging::logging::Level::Warn,
+                "telegram.bot_token not configured on channel-router",
             );
         }
     }
     delete_pending(task_id);
+}
+
+fn telegram_chat_action(token: &str, chat_id: &str, action: &str) -> Result<(), String> {
+    telegram_post(token, "sendChatAction", &json!({"chat_id": chat_id, "action": action}))
+}
+
+fn telegram_send(token: &str, chat_id: &str, text: &str) -> Result<(), String> {
+    telegram_post(token, "sendMessage", &json!({"chat_id": chat_id, "text": text}))
+}
+
+fn telegram_post(token: &str, method: &str, body: &Value) -> Result<(), String> {
+    use wasi::http::outgoing_handler;
+    use wasi::http::types::{Fields, Method, OutgoingBody, OutgoingRequest, Scheme};
+    let body_bytes = serde_json::to_vec(body).map_err(|e| e.to_string())?;
+    let headers = Fields::new();
+    headers
+        .set("content-type", &[b"application/json".to_vec()])
+        .map_err(|e| format!("{e:?}"))?;
+    let req = OutgoingRequest::new(headers);
+    req.set_method(&Method::Post).map_err(|_| "method".to_string())?;
+    req.set_scheme(Some(&Scheme::Https)).map_err(|_| "scheme".to_string())?;
+    req.set_authority(Some("api.telegram.org"))
+        .map_err(|_| "authority".to_string())?;
+    req.set_path_with_query(Some(&format!("/bot{token}/{method}")))
+        .map_err(|_| "path".to_string())?;
+    let outgoing = req.body().map_err(|_| "body".to_string())?;
+    {
+        let stream = outgoing.write().map_err(|_| "stream".to_string())?;
+        for chunk in body_bytes.chunks(4096) {
+            stream
+                .blocking_write_and_flush(chunk)
+                .map_err(|e| format!("{e:?}"))?;
+        }
+    }
+    OutgoingBody::finish(outgoing, None).map_err(|e| format!("{e:?}"))?;
+    let fut = outgoing_handler::handle(req, None).map_err(|e| format!("{e:?}"))?;
+    fut.subscribe().block();
+    let _resp = fut
+        .get()
+        .ok_or("no resp")?
+        .map_err(|_| "consumed".to_string())?
+        .map_err(|e| format!("{e:?}"))?;
+    Ok(())
 }
 
 struct Component;
