@@ -45,11 +45,10 @@ build_iface_array() {
     local out="["
     local first=1
     for spec in "$@"; do
-        IFS=':' read -ra parts <<< "$spec"
-        local ns="${parts[0]}"
-        local pkg="${parts[1]}"
-        local ifaces="${parts[2]}"
-        local cfg="${parts[3]:-}"
+        # Use 4-field read so cfg values can contain `:` (e.g. URLs).
+        local ns pkg ifaces cfg
+        IFS=':' read -r ns pkg ifaces cfg <<< "$spec"
+        cfg="${cfg:-}"
 
         local iface_json="["
         local f=1
@@ -131,6 +130,9 @@ deploy_workload() {
 EOF
 )
     echo "==> ${workload_id}"
+    if [ "${MYCELIUM_DEPLOY_DEBUG:-0}" = "1" ]; then
+        echo "$payload" >&2
+    fi
     local reply
     reply=$(nats --server "$NATS_URL" req "runtime.host.${HOST_ID}.workload.start" "$payload" --timeout 60s 2>&1 \
         | sed -n '/{/,$p')

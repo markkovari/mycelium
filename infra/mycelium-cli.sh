@@ -49,19 +49,25 @@ _kv_write() {
 set_secret() { _kv_write "$SECRETS_FILE" "$1" "$2"; }
 
 redeploy() {
-    log "Redeploying workloads (this picks up new secrets without dropping NATS state)"
-    local tmp_dep
-    tmp_dep=$(mktemp)
-    if ! curl -fsSL "https://raw.githubusercontent.com/${GHCR_OWNER}/mycelium/${MYCELIUM_REF}/infra/deploy-v2.sh" -o "$tmp_dep"; then
-        warn "Could not fetch deploy-v2.sh from ref=${MYCELIUM_REF}; falling back to /usr/local/share/mycelium/deploy-v2.sh"
-        cp "/usr/local/share/mycelium/deploy-v2.sh" "$tmp_dep" 2>/dev/null || die "deploy-v2.sh not available"
+    log "Redeploying workloads (picks up new secrets without dropping NATS state)"
+    local dep="/usr/local/share/mycelium/deploy-v2.sh"
+    if [ ! -x "$dep" ]; then
+        log "Fetching deploy-v2.sh from ref=${MYCELIUM_REF}"
+        local tmp
+        tmp=$(mktemp)
+        curl -fsSL "https://raw.githubusercontent.com/${GHCR_OWNER}/mycelium/${MYCELIUM_REF}/infra/deploy-v2.sh" -o "$tmp" \
+            || die "could not fetch deploy-v2.sh"
+        $SUDO mkdir -p /usr/local/share/mycelium
+        $SUDO install -m 0755 "$tmp" "$dep"
+        rm -f "$tmp"
     fi
-    OCI_REGISTRY="${GHCR_REGISTRY}/${GHCR_OWNER}/mycelium" \
-    IMAGE_TAG="$IMAGE_TAG" \
-    NATS_URL="$NATS_URL" \
-    MYCELIUM_SECRETS_FILE="$SECRETS_FILE" \
-    bash "$tmp_dep"
-    rm -f "$tmp_dep"
+    # Run as root so secrets.env (mode 0600) can be sourced.
+    $SUDO env \
+        OCI_REGISTRY="${GHCR_REGISTRY}/${GHCR_OWNER}/mycelium" \
+        IMAGE_TAG="$IMAGE_TAG" \
+        NATS_URL="$NATS_URL" \
+        MYCELIUM_SECRETS_FILE="$SECRETS_FILE" \
+        bash "$dep"
 }
 
 cmd_provider() {
@@ -72,7 +78,7 @@ cmd_provider() {
         gemini)
             [ -z "$v" ] && die "gemini provider needs API key"
             endpoint="https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
-            model="${MYCELIUM_MODEL:-gemini-2.0-flash}"
+            model="${MYCELIUM_MODEL:-gemini-flash-lite-latest}"
             set_secret "LLM_ENDPOINT" "$endpoint"
             set_secret "LLM_MODEL" "$model"
             set_secret "LLM_API_KEY" "$v"
@@ -178,9 +184,62 @@ cmd_agent() {
 cmd_chat() {
     local agent="${1:-}" text="${2:-}"
     [ -z "$agent" ] || [ -z "$text" ] && die "usage: mycelium chat <agent-id> <text>"
-    local body
-    body=$(python3 -c "import json,sys;print(json.dumps({'agent_id':sys.argv[1],'text':sys.argv[2]}))" "$agent" "$text")
-    curl -sf -X POST -H "host: $HOSTHDR" -H 'content-type: application/json' -d "$body" "$API/tasks" && echo
+    command -v nats >/dev/null 2>&1 || die "nats CLI required (install: apt install unzip; see install.sh)"
+
+    # Persist the conversation + user message via the gateway so future state
+    # (memory store, history) can pick it up.
+    local conv_body conv_resp conv_id
+    conv_body=$(python3 -c "import json,sys;print(json.dumps({'agent_id':sys.argv[1]}))" "$agent")
+    conv_resp=$(/usr/bin/curl -sf -X POST -H "host: $HOSTHDR" -H 'content-type: application/json' \
+        -d "$conv_body" "$API/conversations") || die "POST /conversations failed"
+    conv_id=$(python3 -c 'import json,sys;print(json.load(sys.stdin)["id"])' <<<"$conv_resp")
+    log "conversation $conv_id"
+
+    local msg_body
+    msg_body=$(python3 -c "import json,sys;print(json.dumps({'role':'user','content':sys.argv[1]}))" "$text")
+    /usr/bin/curl -sf -X POST -H "host: $HOSTHDR" -H 'content-type: application/json' \
+        -d "$msg_body" "$API/conversations/${conv_id}/messages" >/dev/null || die "POST /messages failed"
+
+    # The gateway can't publish to NATS (HTTP plugin context limitation), so
+    # the CLI triggers the executor directly.
+    local task_id task_body
+    task_id=$(python3 -c 'import uuid;print(uuid.uuid4())')
+    task_body=$(python3 -c "
+import json,sys,datetime
+print(json.dumps({
+    'id': sys.argv[1],
+    'conversation_id': sys.argv[2],
+    'agent_id': sys.argv[3],
+    'input': sys.argv[4],
+    'created_at': datetime.datetime.utcnow().isoformat()+'Z'
+}))" "$task_id" "$conv_id" "$agent" "$text")
+
+    log "publishing task $task_id → mycelium.task.submit"
+    # Start subscriber BEFORE publishing to avoid missing the result.
+    local sub_log
+    sub_log=$(mktemp)
+    nats --server="$NATS_URL" sub mycelium.step.result --count=1 --raw >"$sub_log" 2>/dev/null &
+    local sub_pid=$!
+    sleep 0.5
+    nats --server="$NATS_URL" pub mycelium.task.submit "$task_body" >/dev/null
+
+    log "waiting for mycelium.step.result (up to 30s)…"
+    local i=0
+    while [ $i -lt 30 ] && kill -0 $sub_pid 2>/dev/null; do
+        sleep 1; i=$((i+1))
+    done
+    kill $sub_pid 2>/dev/null
+    wait $sub_pid 2>/dev/null
+    local raw
+    raw=$(cat "$sub_log")
+    rm -f "$sub_log"
+    if [ -z "$raw" ]; then
+        warn "no step.result within 30s; check: mycelium logs host"
+        return 1
+    fi
+    echo
+    echo "─── step result ───"
+    printf '%s\n' "$raw" | python3 -m json.tool 2>/dev/null || printf '%s\n' "$raw"
 }
 
 cmd_config_show() {
@@ -246,7 +305,7 @@ BANNER
             local key model
             prompt_secret key "  Gemini API key"
             [ -z "$key" ] && die "key required"
-            prompt model "  Model" "gemini-2.0-flash"
+            prompt model "  Model" "gemini-flash-lite-latest"
             MYCELIUM_MODEL="$model" cmd_provider gemini "$key" >/dev/null
             log "Gemini provider configured (model=$model)"
             ;;
