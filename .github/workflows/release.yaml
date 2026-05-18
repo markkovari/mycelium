@@ -44,7 +44,7 @@ jobs:
           targets: wasm32-wasip2
 
       - name: Install wash 2.x
-        uses: wasmcloud/common-actions/install-wash@v3
+        uses: wasmcloud/setup-wash-action@v2.1.0
 
       - name: Install cargo-component
         run: cargo install --locked cargo-component
