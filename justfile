@@ -18,6 +18,11 @@ default:
 up:
     #!/usr/bin/env bash
     set -euo pipefail
+    # Auto-tune AGENT_POOL_SIZE / API_POOL_SIZE / TOOLS_POOL_SIZE if not set.
+    if [ -z "${AGENT_POOL_SIZE:-}${API_POOL_SIZE:-}${TOOLS_POOL_SIZE:-}" ]; then
+        eval "$(bash infra/detect-resources.sh)"
+        echo "Auto-tuned pool sizes: agent=${AGENT_POOL_SIZE} api=${API_POOL_SIZE} tools=${TOOLS_POOL_SIZE}"
+    fi
     echo "==> NATS (JetStream :4222, store {{nats_store}})"
     mkdir -p "{{nats_store}}"
     nats-server -js -sd "{{nats_store}}" -p 4222 &>/tmp/mycelium-nats.log &

@@ -1,0 +1,26 @@
+[Unit]
+Description=Mycelium NATS JetStream
+Documentation=https://github.com/markkovari/mycelium
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/nats-server -js -sd /var/lib/mycelium/nats -p 4222
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=65536
+
+# Hardening
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+ReadWritePaths=/var/lib/mycelium/nats /var/log/mycelium
+
+# Resource caps (tune for Pi Zero 2 W if needed)
+MemoryHigh=200M
+MemoryMax=400M
+
+[Install]
+WantedBy=multi-user.target
