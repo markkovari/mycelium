@@ -38,6 +38,18 @@ fn random_uuid_v4() -> String {
     )
 }
 
+fn seen_update(update_id: u64) -> bool {
+    let Ok(bucket) = wasi::keyvalue::store::open("mycelium-channel-pending") else {
+        return false;
+    };
+    let key = format!("seen/{update_id}");
+    if matches!(bucket.exists(&key), Ok(true)) {
+        return true;
+    }
+    let _ = bucket.set(&key, b"1");
+    false
+}
+
 fn pick_default_agent() -> Option<String> {
     if let Some(id) = cfg("default.agent_id") {
         if !id.is_empty() && id != "auto" {
@@ -161,6 +173,14 @@ fn handle_telegram_raw(body: &[u8]) {
             return;
         }
     };
+    // Dedupe by update_id. wash 2.1.0 may deliver the same raw subject to
+    // multiple concurrent handler instances; we only want to fire one task
+    // per Telegram update.
+    if let Some(uid) = update.get("update_id").and_then(|v| v.as_u64()) {
+        if seen_update(uid) {
+            return;
+        }
+    }
     let Some(message) = update.get("message") else {
         return;
     };
