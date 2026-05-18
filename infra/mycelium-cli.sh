@@ -20,9 +20,15 @@
 set -euo pipefail
 
 CONF_DIR="${MYCELIUM_CONF_DIR:-/etc/mycelium}"
-ENV_FILE="$CONF_DIR/host.env"
+ENV_FILE="$CONF_DIR/host.env"            # systemd EnvironmentFile (shell-var keys only)
+SECRETS_FILE="$CONF_DIR/secrets.env"     # consumed by deploy-v2.sh, NOT systemd
 API="${MYCELIUM_API:-http://127.0.0.1:8080}"
 HOSTHDR="${MYCELIUM_HOSTHDR:-localhost}"
+NATS_URL="${NATS_URL:-nats://127.0.0.1:4222}"
+GHCR_OWNER="${GHCR_OWNER:-markkovari}"
+GHCR_REGISTRY="${GHCR_REGISTRY:-ghcr.io}"
+IMAGE_TAG="${IMAGE_TAG:-dev}"
+MYCELIUM_REF="${MYCELIUM_REF:-main}"
 
 if [ "$(id -u)" -ne 0 ]; then SUDO="sudo"; else SUDO=""; fi
 
@@ -30,21 +36,32 @@ die()  { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 log()  { printf '\033[1;36m[mycelium]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[mycelium]\033[0m %s\n' "$*" >&2; }
 
-set_env_kv() {
-    local key="$1" val="$2"
-    $SUDO mkdir -p "$CONF_DIR"
-    $SUDO touch "$ENV_FILE"
-    $SUDO chmod 600 "$ENV_FILE"
+_kv_write() {
+    # _kv_write <file> <key> <value>
+    local file="$1" key="$2" val="$3"
+    $SUDO mkdir -p "$(dirname "$file")"
+    $SUDO touch "$file"
+    $SUDO chmod 600 "$file"
     local tmp
     tmp=$($SUDO mktemp)
-    $SUDO sh -c "grep -v '^${key}=' '$ENV_FILE' > '$tmp' || true; printf '%s=%s\n' '$key' '$val' >> '$tmp'; mv '$tmp' '$ENV_FILE'; chmod 600 '$ENV_FILE'"
+    $SUDO sh -c "grep -v '^${key}=' '$file' > '$tmp' || true; printf '%s=%s\n' '$key' '$val' >> '$tmp'; mv '$tmp' '$file'; chmod 600 '$file'"
 }
+set_secret() { _kv_write "$SECRETS_FILE" "$1" "$2"; }
 
-restart_host() {
-    log "Restarting mycelium-host"
-    $SUDO systemctl restart mycelium-host
-    sleep 2
-    $SUDO systemctl --no-pager --lines 0 status mycelium-host || true
+redeploy() {
+    log "Redeploying workloads (this picks up new secrets without dropping NATS state)"
+    local tmp_dep
+    tmp_dep=$(mktemp)
+    if ! curl -fsSL "https://raw.githubusercontent.com/${GHCR_OWNER}/mycelium/${MYCELIUM_REF}/infra/deploy-v2.sh" -o "$tmp_dep"; then
+        warn "Could not fetch deploy-v2.sh from ref=${MYCELIUM_REF}; falling back to /usr/local/share/mycelium/deploy-v2.sh"
+        cp "/usr/local/share/mycelium/deploy-v2.sh" "$tmp_dep" 2>/dev/null || die "deploy-v2.sh not available"
+    fi
+    OCI_REGISTRY="${GHCR_REGISTRY}/${GHCR_OWNER}/mycelium" \
+    IMAGE_TAG="$IMAGE_TAG" \
+    NATS_URL="$NATS_URL" \
+    MYCELIUM_SECRETS_FILE="$SECRETS_FILE" \
+    bash "$tmp_dep"
+    rm -f "$tmp_dep"
 }
 
 cmd_provider() {
@@ -56,49 +73,47 @@ cmd_provider() {
             [ -z "$v" ] && die "gemini provider needs API key"
             endpoint="https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
             model="${MYCELIUM_MODEL:-gemini-2.0-flash}"
-            set_env_kv "llm.endpoint" "$endpoint"
-            set_env_kv "llm.model" "$model"
-            set_env_kv "llm.api_key" "$v"
+            set_secret "LLM_ENDPOINT" "$endpoint"
+            set_secret "LLM_MODEL" "$model"
+            set_secret "LLM_API_KEY" "$v"
             ;;
         openai)
             [ -z "$v" ] && die "openai provider needs API key"
             endpoint="https://api.openai.com/v1/chat/completions"
             model="${MYCELIUM_MODEL:-gpt-4o-mini}"
-            set_env_kv "llm.endpoint" "$endpoint"
-            set_env_kv "llm.model" "$model"
-            set_env_kv "llm.api_key" "$v"
+            set_secret "LLM_ENDPOINT" "$endpoint"
+            set_secret "LLM_MODEL" "$model"
+            set_secret "LLM_API_KEY" "$v"
             ;;
         anthropic)
             [ -z "$v" ] && die "anthropic provider needs API key"
-            # Anthropic ships an OpenAI-compat surface; the agent expects the
-            # chat/completions schema.
             endpoint="https://api.anthropic.com/v1/openai/v1/chat/completions"
             model="${MYCELIUM_MODEL:-claude-3-5-haiku-latest}"
-            set_env_kv "llm.endpoint" "$endpoint"
-            set_env_kv "llm.model" "$model"
-            set_env_kv "llm.api_key" "$v"
+            set_secret "LLM_ENDPOINT" "$endpoint"
+            set_secret "LLM_MODEL" "$model"
+            set_secret "LLM_API_KEY" "$v"
             ;;
         ollama)
             endpoint="${v:-http://127.0.0.1:11434/v1/chat/completions}"
             model="${MYCELIUM_MODEL:-qwen2.5:0.5b}"
-            set_env_kv "llm.endpoint" "$endpoint"
-            set_env_kv "llm.model" "$model"
+            set_secret "LLM_ENDPOINT" "$endpoint"
+            set_secret "LLM_MODEL" "$model"
             ;;
         custom)
             [ -z "$v" ] && die "custom provider needs full endpoint URL"
-            set_env_kv "llm.endpoint" "$v"
+            set_secret "LLM_ENDPOINT" "$v"
             ;;
         *) die "unknown provider: $p" ;;
     esac
     log "Provider set: $p (endpoint=$endpoint model=$model)"
-    restart_host
+    redeploy
 }
 
 cmd_token() {
     local kind="${1:-}" val="${2:-}"
     [ -z "$kind" ] || [ -z "$val" ] && die "usage: mycelium token telegram <token>"
     case "$kind" in
-        telegram) set_env_kv "telegram.bot_token" "$val"; log "telegram.bot_token set"; restart_host ;;
+        telegram) set_secret "TELEGRAM_BOT_TOKEN" "$val"; log "telegram bot token saved"; redeploy ;;
         *) die "unknown token kind: $kind" ;;
     esac
 }
@@ -106,9 +121,9 @@ cmd_token() {
 cmd_model() {
     local m="${1:-}"
     [ -z "$m" ] && die "usage: mycelium model <model-name>"
-    set_env_kv "llm.model" "$m"
-    log "llm.model = $m"
-    restart_host
+    set_secret "LLM_MODEL" "$m"
+    log "LLM_MODEL = $m"
+    redeploy
 }
 
 cmd_status() {
@@ -169,8 +184,11 @@ cmd_chat() {
 }
 
 cmd_config_show() {
-    [ -f "$ENV_FILE" ] || die "no env file at $ENV_FILE"
-    $SUDO sed -E 's/(api_key|bot_token)=.*/\1=***redacted***/' "$ENV_FILE"
+    echo "# $SECRETS_FILE"
+    [ -f "$SECRETS_FILE" ] && $SUDO sed -E 's/(API_KEY|BOT_TOKEN)=.*/\1=***redacted***/' "$SECRETS_FILE" || echo "(empty)"
+    echo
+    echo "# $ENV_FILE"
+    [ -f "$ENV_FILE" ] && $SUDO cat "$ENV_FILE" || echo "(empty)"
 }
 
 # ── Onboarding wizard ────────────────────────────────────────────────────────
@@ -321,7 +339,8 @@ main() {
         model)        cmd_model "$@" ;;
         status)       cmd_status ;;
         logs)         cmd_logs "$@" ;;
-        restart)      restart_host ;;
+        restart)      log "Restarting mycelium-host (workloads will redeploy)"; $SUDO systemctl restart mycelium-host; sleep 3; redeploy ;;
+        redeploy)     redeploy ;;
         agent)        cmd_agent "$@" ;;
         chat)         cmd_chat "$@" ;;
         config)

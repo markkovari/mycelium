@@ -137,6 +137,31 @@ EOF
     echo "    $(echo "$reply" | grep -oE 'WORKLOAD_STATE_[A-Z_]+|"message":"[^"]+"' | tr '\n' ' ')"
 }
 
+# Optional secrets file populated by `mycelium provider` / `mycelium token`.
+# Keys use shell-safe names; this script maps them to dotted wasi:config keys.
+SECRETS_FILE="${MYCELIUM_SECRETS_FILE:-/etc/mycelium/secrets.env}"
+if [ -f "$SECRETS_FILE" ]; then
+    # shellcheck disable=SC1090
+    set -a; . "$SECRETS_FILE"; set +a
+fi
+
+# Build per-workload cfg fragments out of the loaded secrets. Missing values
+# are simply omitted, which keeps the workload definitions stable.
+build_cfg() {
+    local out=""
+    while [ $# -ge 2 ]; do
+        local cfg_key="$1"; shift
+        local env_val="$1"; shift
+        if [ -n "${env_val}" ]; then
+            [ -n "$out" ] && out+="+"
+            out+="${cfg_key}=${env_val}"
+        fi
+    done
+    printf '%s' "$out"
+}
+AGENT_CFG="$(build_cfg llm.endpoint "${LLM_ENDPOINT:-}" llm.model "${LLM_MODEL:-}" llm.api_key "${LLM_API_KEY:-}")"
+TELEGRAM_CFG="$(build_cfg telegram.bot_token "${TELEGRAM_BOT_TOKEN:-}")"
+
 # Per-workload pool_size (env-overridable).
 POOL_SIZE_API="${API_POOL_SIZE:-4}"
 POOL_SIZE_AGENT="${AGENT_POOL_SIZE:-8}"
@@ -148,12 +173,12 @@ POOL_SIZE_DEFAULT="${POOL_SIZE_DEFAULT:-1}"
 # ifaces: pipe-separated specs (ns:pkg:iface1,iface2[:cfg_k=v,cfg_k=v])
 WORKLOADS=(
     "mycelium-api;api;gateway,conversation-store,agent-registry;wasi:http:incoming-handler:host=localhost|wasi:keyvalue:store|wasi:logging:logging;${POOL_SIZE_API}"
-    "mycelium-telegram-poll;telegram-poll;telegram-poller;wasi:config:store|wasi:keyvalue:store|wasi:logging:logging|wasi:http:outgoing-handler|wasmcloud:messaging:consumer,handler,types:subscriptions=mycelium.telegram.poll.tick;${POOL_SIZE_DEFAULT}"
+    "mycelium-telegram-poll;telegram-poll;telegram-poller;wasi:config:store${TELEGRAM_CFG:+:}${TELEGRAM_CFG}|wasi:keyvalue:store|wasi:logging:logging|wasi:http:outgoing-handler|wasmcloud:messaging:consumer,handler,types:subscriptions=mycelium.telegram.poll.tick;${POOL_SIZE_DEFAULT}"
     "mycelium-channel-router;channel-router;channel-router,agent-registry;wasi:keyvalue:store|wasi:logging:logging|wasmcloud:messaging:consumer,handler,types:subscriptions=mycelium.channel.telegram.raw;${POOL_SIZE_DEFAULT}"
-    "mycelium-telegram-out;telegram-out;telegram-out;wasi:config:store|wasi:logging:logging|wasi:http:outgoing-handler|wasmcloud:messaging:consumer,handler,types:subscriptions=mycelium.channel.telegram.out.>;${POOL_SIZE_DEFAULT}"
+    "mycelium-telegram-out;telegram-out;telegram-out;wasi:config:store${TELEGRAM_CFG:+:}${TELEGRAM_CFG}|wasi:logging:logging|wasi:http:outgoing-handler|wasmcloud:messaging:consumer,handler,types:subscriptions=mycelium.channel.telegram.out.>;${POOL_SIZE_DEFAULT}"
     "mycelium-pairing;pairing;session-bridge;wasi:keyvalue:store|wasi:logging:logging|wasmcloud:messaging:consumer,handler,types:subscriptions=mycelium.pair.>;${POOL_SIZE_DEFAULT}"
     "mycelium-executor;executor;executor;wasi:keyvalue:store|wasi:logging:logging|wasmcloud:messaging:consumer,handler,types:subscriptions=mycelium.task.submit,mycelium.step.result;${POOL_SIZE_DEFAULT}"
-    "mycelium-agent;agent;agent;wasi:keyvalue:store|wasi:config:store|wasi:logging:logging|wasi:http:outgoing-handler|wasmcloud:messaging:consumer,handler,types:subscriptions=mycelium.task.step.agent,mycelium.tool.result;${POOL_SIZE_AGENT}"
+    "mycelium-agent;agent;agent;wasi:keyvalue:store|wasi:config:store${AGENT_CFG:+:}${AGENT_CFG}|wasi:logging:logging|wasi:http:outgoing-handler|wasmcloud:messaging:consumer,handler,types:subscriptions=mycelium.task.step.agent,mycelium.tool.result;${POOL_SIZE_AGENT}"
     "mycelium-tools;tools;tool-runner;wasi:keyvalue:store|wasi:logging:logging|wasmcloud:messaging:consumer,handler,types:subscriptions=mycelium.tool.call;${POOL_SIZE_TOOLS}"
     "mycelium-memory;memory;memory-store;wasi:keyvalue:store|wasi:logging:logging|wasmcloud:messaging:consumer,handler,types:subscriptions=mycelium.memory.>;${POOL_SIZE_DEFAULT}"
     "mycelium-router;router;router;wasi:keyvalue:store|wasi:logging:logging|wasmcloud:messaging:consumer,handler,types:subscriptions=mycelium.event.>;${POOL_SIZE_DEFAULT}"
