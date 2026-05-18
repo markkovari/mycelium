@@ -112,20 +112,27 @@ if ! command -v wash >/dev/null 2>&1; then
     if ! curl -fsSL https://wasmcloud.com/sh | bash; then
         die "wash install failed; try installing manually from https://github.com/wasmCloud/wash/releases"
     fi
-    # The installer drops wash in ~/.wash/bin (current) or ~/.wasmcloud (older); copy
-    # to $MYCELIUM_PREFIX/bin so systemd (with ProtectHome=true) can exec it.
-    wash_src=""
-    for cand in "$HOME/.wash/bin/wash" "$HOME/.wasmcloud/bin/wash" "/usr/local/bin/wash"; do
-        if [ -x "$cand" ]; then wash_src="$cand"; break; fi
-    done
-    [ -z "$wash_src" ] && die "wash installed but binary not found in ~/.wash/bin or ~/.wasmcloud/bin"
-    if [ "$wash_src" != "$MYCELIUM_PREFIX/bin/wash" ]; then
-        $SUDO install -m 0755 "$wash_src" "$MYCELIUM_PREFIX/bin/wash"
-    fi
-    export PATH="$MYCELIUM_PREFIX/bin:$PATH"
-else
-    log "wash already installed: $(command -v wash)"
 fi
+# Always ensure $MYCELIUM_PREFIX/bin/wash exists as a regular file so systemd
+# (with ProtectHome=true) can exec it; the upstream installer drops it in
+# $HOME/.wash/bin which the unit's namespace cannot see.
+wash_src=""
+for cand in "$MYCELIUM_PREFIX/bin/wash" "$HOME/.wash/bin/wash" "$HOME/.wasmcloud/bin/wash" "$(command -v wash 2>/dev/null || true)"; do
+    [ -n "$cand" ] && [ -x "$cand" ] && [ ! -L "$cand" ] && { wash_src="$cand"; break; }
+done
+# Fallback: accept a symlink only if the target is itself a regular file outside $HOME.
+if [ -z "$wash_src" ]; then
+    for cand in "$HOME/.wash/bin/wash" "$HOME/.wasmcloud/bin/wash"; do
+        [ -x "$cand" ] && { wash_src="$cand"; break; }
+    done
+fi
+[ -z "$wash_src" ] && die "wash binary not found after install"
+if [ "$wash_src" != "$MYCELIUM_PREFIX/bin/wash" ]; then
+    log "Copying wash from $wash_src → $MYCELIUM_PREFIX/bin/wash"
+    $SUDO install -m 0755 "$wash_src" "$MYCELIUM_PREFIX/bin/wash"
+fi
+export PATH="$MYCELIUM_PREFIX/bin:$PATH"
+log "wash: $(command -v wash) ($(wash --version 2>/dev/null | head -1))"
 
 # ── Verify registry reachability ─────────────────────────────────────────────
 # wash host pulls components on demand into --oci-cache-dir. We only verify
