@@ -70,6 +70,9 @@ $SUDO mkdir -p \
     "$MYCELIUM_PREFIX/bin" \
     "$MYCELIUM_DATA_DIR/nats" \
     "$MYCELIUM_DATA_DIR/oci-cache" \
+    "$MYCELIUM_DATA_DIR/wash/config" \
+    "$MYCELIUM_DATA_DIR/wash/data" \
+    "$MYCELIUM_DATA_DIR/wash/cache" \
     "$MYCELIUM_CONF_DIR" \
     /var/log/mycelium
 
