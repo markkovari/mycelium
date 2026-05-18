@@ -68,8 +68,8 @@ fn publish(subject: &str, body: Vec<u8>) {
 }
 
 fn tick_once() {
-    publish(TICK_SUBJECT, Vec::new());
-
+    // Self-tick is re-published at the END of this fn so we don't queue up a
+    // tick storm while we're still blocked on Telegram's long-poll.
     let Some(token) = cfg("telegram.bot_token") else {
         log(
             wasi::logging::logging::Level::Warn,
@@ -125,6 +125,8 @@ fn tick_once() {
             sleep_ms(2_000);
         }
     }
+    // Re-arm the loop exactly once per completed tick.
+    publish(TICK_SUBJECT, Vec::new());
 }
 
 struct Component;
