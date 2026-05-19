@@ -303,12 +303,4 @@ impl exports::mycelium::conversation::conversations::Guest for Component {
     }
 }
 
-impl exports::wasmcloud::messaging::handler::Guest for Component {
-    fn handle_message(_msg: wasmcloud::messaging::types::BrokerMessage) -> Result<(), String> {
-        // No-op for now — clients invoke conversation-store via WIT exports.
-        // Optional RPC façade can be added later if cli needs it.
-        Ok(())
-    }
-}
-
 export!(Component);
