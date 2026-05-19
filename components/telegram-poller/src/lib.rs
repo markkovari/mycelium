@@ -79,14 +79,16 @@ fn try_acquire_lock() -> bool {
     if new == 1 {
         true
     } else {
-        // Someone else holds it. Don't decrement — the holder will reset to 0.
+        // Someone else holds it. Decrement our +1 so the counter stays sane.
+        let _ = wasi::keyvalue::atomics::increment(&bucket, "lock", -1);
         false
     }
 }
 
 fn release_lock() {
     if let Ok(bucket) = wasi::keyvalue::store::open(STATE_BUCKET) {
-        let _ = bucket.set("lock", b"0");
+        // Symmetric atomic decrement so the counter stays parseable as integer.
+        let _ = wasi::keyvalue::atomics::increment(&bucket, "lock", -1);
     }
 }
 
