@@ -273,19 +273,24 @@ impl exports::wasmcloud::messaging::handler::Guest for Component {
                 }
                 // All results in — fold them into conversation as tool messages,
                 // then re-arm the agent step.
+                // Gemini's OpenAI-compat surface rejects Tool-role messages
+                // without a matching prior assistant.tool_calls entry, which we
+                // don't reconstruct. Fold the tool result into a synthetic User
+                // message instead — it goes straight into the prompt so the
+                // model sees the data on the next pass.
                 if let Some(pending) = load_pending(&task_id) {
                     if !pending.conversation_id.is_empty() {
                         for r in &state.tool_results {
                             let content = match (&r.output, &r.error) {
-                                (Some(o), _) => o.clone(),
-                                (_, Some(e)) => format!("(tool error: {e})"),
-                                _ => String::new(),
+                                (Some(o), _) => format!("[tool {} returned: {}]", r.name, o),
+                                (_, Some(e)) => format!("[tool {} failed: {}]", r.name, e),
+                                _ => format!("[tool {} returned: <empty>]", r.name),
                             };
                             let _ = mycelium::conversation::conversations::append_message(
                                 &pending.conversation_id,
-                                mycelium::types::types::MessageRole::Tool,
+                                mycelium::types::types::MessageRole::User,
                                 &content,
-                                Some(&r.id),
+                                None,
                             );
                         }
                     }
