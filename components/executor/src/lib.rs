@@ -299,6 +299,11 @@ impl exports::wasmcloud::messaging::handler::Guest for Component {
                 state.pending_tool_calls.clear();
                 state.status = "running".into();
                 save_state(&state)?;
+                // Reset the agent's dedup claim so the next step.agent fan-out
+                // is allowed to call Gemini exactly once.
+                if let Ok(b) = wasi::keyvalue::store::open("mycelium-task-state") {
+                    let _ = b.delete(&format!("agent-claim/{task_id}"));
+                }
                 let step = StepRequest {
                     task_id: &task_id,
                     conversation_id: &state.task.conversation_id,

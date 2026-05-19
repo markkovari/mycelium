@@ -121,6 +121,21 @@ fn note_circuit_success() {
     }
 }
 
+/// Atomic per-step claim. Each NEW step.agent invocation for a task should
+/// produce a fresh increment from the executor's perspective; the agent
+/// itself only needs to know that one of the parallel runs wins. We dedup
+/// by (task_id, current step value in task-state) — but to keep things
+/// simple, we just dedup on task_id + a coarse "claim" counter that the
+/// executor resets per step.
+fn claim_step(task_id: &str) -> bool {
+    let Ok(bucket) = wasi::keyvalue::store::open(RATE_BUCKET) else { return true };
+    let key = format!("agent-claim/{task_id}");
+    let n = wasi::keyvalue::atomics::increment(&bucket, &key, 1).unwrap_or(0);
+    // Only the first claimer per step proceeds. Executor resets the key when
+    // it pushes the next step.agent (after collecting tool results).
+    n == 1
+}
+
 /// For each name in `wanted`, look up its JSON schema in `mycelium-tools`
 /// KV and produce an OpenAI tools[] entry. Missing entries are skipped.
 fn load_tool_specs(wanted: &[String]) -> Vec<Value> {
@@ -367,6 +382,13 @@ impl exports::wasmcloud::messaging::handler::Guest for Component {
         match msg.subject.as_str() {
             "mycelium.task.step.agent" => {
                 let req: StepReq = serde_json::from_slice(&body).map_err(|e| e.to_string())?;
+                // Dedup concurrent invocations of the same step. wash 2.1.0
+                // fans the message to multiple instances of this workload
+                // simultaneously; without this they all call Gemini for the
+                // same task.
+                if !claim_step(&req.task_id) {
+                    return Ok(());
+                }
                 let stored = load_agent_config(&req.agent_id);
                 let endpoint = stored
                     .as_ref()
