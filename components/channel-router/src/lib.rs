@@ -50,7 +50,12 @@ fn seen_update(update_id: u64) -> bool {
     false
 }
 
-fn pick_default_agent() -> Option<String> {
+fn pick_default_agent_for_chat(chat_id: &str) -> Option<String> {
+    if let Some(id) = load_chat_agent(chat_id) {
+        if !id.is_empty() {
+            return Some(id);
+        }
+    }
     if let Some(id) = cfg("default.agent_id") {
         if !id.is_empty() && id != "auto" {
             return Some(id);
@@ -153,6 +158,136 @@ fn try_agent_create(text: &str) -> bool {
     }
 }
 
+fn try_slash_command(chat_id: &str, text: &str) -> bool {
+    if !text.starts_with('/') {
+        return false;
+    }
+    let token = match cfg("telegram.bot_token") {
+        Some(t) => t,
+        None => return false,
+    };
+    let send = |msg: &str| {
+        let _ = telegram_send(&token, chat_id, msg);
+    };
+
+    let mut it = text.splitn(2, ' ');
+    let cmd = it.next().unwrap_or("");
+    let rest = it.next().unwrap_or("").trim();
+
+    match cmd {
+        "/help" | "/start" => {
+            send("commands:\n/help — this menu\n/agents — list agents\n/agent set <id> — switch active agent for this chat\n/agent create <id> <model> <prompt> — register a new agent\n/reset — clear conversation history\n/memory — show last 10 messages\n/tools — list registered tools");
+            true
+        }
+        "/agents" => {
+            let active = load_chat_agent(chat_id).unwrap_or_else(|| "(none)".to_string());
+            let list: String = match mycelium::agent::agent_registry::list_agents() {
+                Ok(v) => {
+                    if v.is_empty() {
+                        "no agents yet — use /agent create <id> <model> <prompt>".to_string()
+                    } else {
+                        v.iter()
+                            .map(|a| {
+                                let marker = if a.id == active { "* " } else { "  " };
+                                format!("{marker}{} ({})", a.id, a.model)
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    }
+                }
+                Err(e) => format!("list_agents failed: {e:?}"),
+            };
+            send(&list);
+            true
+        }
+        "/agent" => {
+            let mut sub = rest.splitn(2, ' ');
+            match sub.next().unwrap_or("") {
+                "set" => {
+                    let id = sub.next().unwrap_or("").trim();
+                    if id.is_empty() {
+                        send("usage: /agent set <id>");
+                    } else {
+                        save_chat_agent(chat_id, id);
+                        send(&format!("default agent for this chat → {id}"));
+                    }
+                    true
+                }
+                "create" => false, // existing handler picks it up
+                _ => {
+                    send("usage: /agent set <id> | /agent create <id> <model> <prompt>");
+                    true
+                }
+            }
+        }
+        "/reset" => {
+            if let Some(conv_id) = load_chat_conv(chat_id) {
+                let _ = mycelium::conversation::conversations::delete(&conv_id);
+                clear_chat_conv(chat_id);
+                send("conversation cleared.");
+            } else {
+                send("nothing to reset.");
+            }
+            true
+        }
+        "/memory" => {
+            let body = match load_chat_conv(chat_id) {
+                None => "no conversation yet.".to_string(),
+                Some(cid) => match mycelium::conversation::conversations::get_messages(&cid) {
+                    Err(e) => format!("get_messages failed: {e:?}"),
+                    Ok(msgs) => {
+                        let tail: Vec<_> = msgs.iter().rev().take(10).collect();
+                        if tail.is_empty() {
+                            "(empty)".to_string()
+                        } else {
+                            tail.iter()
+                                .rev()
+                                .map(|m| {
+                                    let role = match m.role {
+                                        mycelium::types::types::MessageRole::User => "you",
+                                        mycelium::types::types::MessageRole::Assistant => "bot",
+                                        mycelium::types::types::MessageRole::System => "sys",
+                                        mycelium::types::types::MessageRole::Tool => "tool",
+                                    };
+                                    let snippet: String =
+                                        m.content.chars().take(120).collect();
+                                    format!("{role}: {snippet}")
+                                })
+                                .collect::<Vec<_>>()
+                                .join("\n")
+                        }
+                    }
+                },
+            };
+            send(&body);
+            true
+        }
+        "/tools" => {
+            send("no tools registered (phase D pending).");
+            true
+        }
+        _ => false,
+    }
+}
+
+fn load_chat_agent(chat_id: &str) -> Option<String> {
+    let bucket = wasi::keyvalue::store::open(PENDING_BUCKET).ok()?;
+    let bytes = bucket.get(&format!("default-agent/{chat_id}")).ok().flatten()?;
+    String::from_utf8(bytes).ok()
+}
+
+fn save_chat_agent(chat_id: &str, agent_id: &str) {
+    if let Ok(bucket) = wasi::keyvalue::store::open(PENDING_BUCKET) {
+        let _ = bucket.set(&format!("default-agent/{chat_id}"), agent_id.as_bytes());
+    }
+}
+
+fn clear_chat_conv(chat_id: &str) {
+    if let Ok(bucket) = wasi::keyvalue::store::open(PENDING_BUCKET) {
+        let _ = bucket.delete(&format!("conv/{chat_id}"));
+    }
+}
+
 fn handle_telegram_raw(body: &[u8]) {
     let update: Value = match serde_json::from_slice(body) {
         Ok(v) => v,
@@ -187,7 +322,10 @@ fn handle_telegram_raw(body: &[u8]) {
         .unwrap_or_default();
     let text = message.get("text").and_then(|v| v.as_str()).unwrap_or("");
 
-    // Admin commands short-circuit canonical publish.
+    // Admin commands short-circuit canonical publish + LLM dispatch.
+    if try_slash_command(&chat_id, text) {
+        return;
+    }
     if try_agent_create(text) {
         return;
     }
@@ -207,7 +345,7 @@ fn handle_telegram_raw(body: &[u8]) {
     if text.is_empty() {
         return;
     }
-    let Some(agent_id) = pick_default_agent() else {
+    let Some(agent_id) = pick_default_agent_for_chat(&chat_id) else {
         log(
             wasi::logging::logging::Level::Warn,
             "no agent registered; create one with /agent create or POST /agents",
