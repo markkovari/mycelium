@@ -67,28 +67,31 @@ fn publish(subject: &str, body: Vec<u8>) {
     });
 }
 
-/// Atomic single-holder lock backed by wasi:keyvalue/atomics::increment.
-/// First invocation observes 1 after increment and proceeds; concurrent racers
-/// observe >1 and bail without re-arming. Lock is released by setting back to 0.
+/// Lease-style lock: store the wall-clock seconds at which the holder
+/// acquired it. New invocations bail if a non-expired lease exists.
+/// 30s TTL guards against stuck holders without needing a real counter.
+const LOCK_TTL_S: u64 = 30;
+
 fn try_acquire_lock() -> bool {
     let Ok(bucket) = wasi::keyvalue::store::open(STATE_BUCKET) else { return false };
-    let new = match wasi::keyvalue::atomics::increment(&bucket, "lock", 1) {
-        Ok(v) => v,
-        Err(_) => return false,
-    };
-    if new == 1 {
-        true
-    } else {
-        // Someone else holds it. Decrement our +1 so the counter stays sane.
-        let _ = wasi::keyvalue::atomics::increment(&bucket, "lock", -1);
-        false
+    let now = wasi::clocks::wall_clock::now().seconds;
+    if let Ok(Some(bytes)) = bucket.get("lock-until") {
+        if let Ok(s) = std::str::from_utf8(&bytes) {
+            if let Ok(until) = s.parse::<u64>() {
+                if until > now {
+                    return false;
+                }
+            }
+        }
     }
+    let until = now + LOCK_TTL_S;
+    let _ = bucket.set("lock-until", until.to_string().as_bytes());
+    true
 }
 
 fn release_lock() {
     if let Ok(bucket) = wasi::keyvalue::store::open(STATE_BUCKET) {
-        // Symmetric atomic decrement so the counter stays parseable as integer.
-        let _ = wasi::keyvalue::atomics::increment(&bucket, "lock", -1);
+        let _ = bucket.set("lock-until", b"0");
     }
 }
 
