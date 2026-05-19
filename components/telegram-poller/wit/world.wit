@@ -22,6 +22,7 @@ world telegram-poller {
     import wasi:io/streams@0.2.2;
     import wasi:io/poll@0.2.2;
     import wasi:keyvalue/store@0.2.0-draft;
+    import wasi:keyvalue/atomics@0.2.0-draft;
     import wasi:config/store@0.2.0-rc.1;
     import wasi:clocks/wall-clock@0.2.2;
     import wasi:clocks/monotonic-clock@0.2.2;

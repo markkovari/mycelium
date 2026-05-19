@@ -63,6 +63,64 @@ fn load_agent_config(agent_id: &str) -> Option<StoredAgentConfig> {
     serde_json::from_slice(&bytes).ok()
 }
 
+const RATE_BUCKET: &str = "mycelium-task-state";
+const DEFAULT_RPM: u64 = 20;
+
+/// Returns Ok(remaining) if budget allows the call, Err(over) if over budget
+/// for this wall-clock minute. wasi:config key `llm.rpm` overrides the cap;
+/// `llm.rpm=0` disables the gate.
+fn rate_check(agent_id: &str) -> Result<u64, u64> {
+    let rpm: u64 = cfg("llm.rpm", &DEFAULT_RPM.to_string())
+        .parse()
+        .unwrap_or(DEFAULT_RPM);
+    if rpm == 0 {
+        return Ok(u64::MAX);
+    }
+    let now = wasi::clocks::wall_clock::now();
+    let minute = now.seconds / 60;
+    let key = format!("rate/{agent_id}/{minute}");
+    let bucket = match wasi::keyvalue::store::open(RATE_BUCKET) {
+        Ok(b) => b,
+        Err(_) => return Ok(rpm),
+    };
+    let count = wasi::keyvalue::atomics::increment(&bucket, &key, 1).unwrap_or(0);
+    if count <= rpm {
+        Ok(rpm - count)
+    } else {
+        Err(count - rpm)
+    }
+}
+
+const CIRCUIT_OPEN_UNTIL_KEY: &str = "circuit/open-until";
+const CIRCUIT_FAILS_KEY: &str = "circuit/fails";
+const CIRCUIT_FAIL_THRESHOLD: u64 = 5;
+const CIRCUIT_COOLDOWN_S: u64 = 60;
+
+fn circuit_open() -> Option<u64> {
+    let bucket = wasi::keyvalue::store::open(RATE_BUCKET).ok()?;
+    let bytes = bucket.get(CIRCUIT_OPEN_UNTIL_KEY).ok().flatten()?;
+    let until: u64 = String::from_utf8(bytes).ok()?.parse().ok()?;
+    let now = wasi::clocks::wall_clock::now().seconds;
+    if until > now { Some(until - now) } else { None }
+}
+
+fn note_circuit_failure() {
+    let Ok(bucket) = wasi::keyvalue::store::open(RATE_BUCKET) else { return };
+    let n = wasi::keyvalue::atomics::increment(&bucket, CIRCUIT_FAILS_KEY, 1).unwrap_or(0);
+    if n >= CIRCUIT_FAIL_THRESHOLD {
+        let now = wasi::clocks::wall_clock::now().seconds;
+        let until = now + CIRCUIT_COOLDOWN_S;
+        let _ = bucket.set(CIRCUIT_OPEN_UNTIL_KEY, until.to_string().as_bytes());
+        let _ = bucket.set(CIRCUIT_FAILS_KEY, b"0");
+    }
+}
+
+fn note_circuit_success() {
+    if let Ok(bucket) = wasi::keyvalue::store::open(RATE_BUCKET) {
+        let _ = bucket.set(CIRCUIT_FAILS_KEY, b"0");
+    }
+}
+
 /// For each name in `wanted`, look up its JSON schema in `mycelium-tools`
 /// KV and produce an OpenAI tools[] entry. Missing entries are skipped.
 fn load_tool_specs(wanted: &[String]) -> Vec<Value> {
@@ -354,17 +412,53 @@ impl exports::wasmcloud::messaging::handler::Guest for Component {
                         );
                     }
                 };
+                // Circuit breaker: refuse fast if the breaker is open.
+                if let Some(cooldown) = circuit_open() {
+                    let result = StepResult {
+                        task_id: req.task_id,
+                        output: None,
+                        error: Some(format!(
+                            "circuit open; retry in {cooldown}s after repeated LLM failures"
+                        )),
+                    };
+                    publish(
+                        "mycelium.step.result",
+                        serde_json::to_vec(&result).map_err(|e| e.to_string())?,
+                    )?;
+                    return Ok(());
+                }
+
+                // Rate cap: per-agent calls-per-minute.
+                if let Err(over) = rate_check(&req.agent_id) {
+                    let result = StepResult {
+                        task_id: req.task_id,
+                        output: None,
+                        error: Some(format!(
+                            "rate limit hit ({over} over budget this minute); try again shortly"
+                        )),
+                    };
+                    publish(
+                        "mycelium.step.result",
+                        serde_json::to_vec(&result).map_err(|e| e.to_string())?,
+                    )?;
+                    return Ok(());
+                }
+
                 // Build tools array for the LLM from agent.tools (names) +
                 // mycelium-tools KV (schema for each name).
                 let tool_names = stored.as_ref().map(|s| s.tools.clone()).unwrap_or_default();
                 let tool_specs = load_tool_specs(&tool_names);
 
-                let (out, err, tool_calls) =
-                    match call_llm(&model, &endpoint, api_key, &messages, &tool_specs) {
-                        Ok(LlmReply::Text(content)) => (Some(content), None, Vec::new()),
-                        Ok(LlmReply::Tools(calls)) => (None, None, calls),
-                        Err(e) => (None, Some(e), Vec::new()),
-                    };
+                let llm_outcome = call_llm(&model, &endpoint, api_key, &messages, &tool_specs);
+                match &llm_outcome {
+                    Ok(_) => note_circuit_success(),
+                    Err(_) => note_circuit_failure(),
+                }
+                let (out, err, tool_calls) = match llm_outcome {
+                    Ok(LlmReply::Text(content)) => (Some(content), None, Vec::new()),
+                    Ok(LlmReply::Tools(calls)) => (None, None, calls),
+                    Err(e) => (None, Some(e), Vec::new()),
+                };
 
                 if !tool_calls.is_empty() {
                     let payload = json!({

@@ -67,20 +67,26 @@ fn publish(subject: &str, body: Vec<u8>) {
     });
 }
 
+/// Atomic single-holder lock backed by wasi:keyvalue/atomics::increment.
+/// First invocation observes 1 after increment and proceeds; concurrent racers
+/// observe >1 and bail without re-arming. Lock is released by setting back to 0.
 fn try_acquire_lock() -> bool {
     let Ok(bucket) = wasi::keyvalue::store::open(STATE_BUCKET) else { return false };
-    // exists() acts as our serialization gate; first tick to set it wins, all
-    // concurrent invocations after that observe lock==1 and bail.
-    if matches!(bucket.exists("lock"), Ok(true)) {
-        return false;
+    let new = match wasi::keyvalue::atomics::increment(&bucket, "lock", 1) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    if new == 1 {
+        true
+    } else {
+        // Someone else holds it. Don't decrement — the holder will reset to 0.
+        false
     }
-    let _ = bucket.set("lock", b"1");
-    true
 }
 
 fn release_lock() {
     if let Ok(bucket) = wasi::keyvalue::store::open(STATE_BUCKET) {
-        let _ = bucket.delete("lock");
+        let _ = bucket.set("lock", b"0");
     }
 }
 
