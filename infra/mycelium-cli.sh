@@ -132,6 +132,21 @@ cmd_model() {
     redeploy
 }
 
+cmd_tool() {
+    local sub="${1:-}"; shift || true
+    case "$sub" in
+        list)
+            nats kv ls --server="$NATS_URL" mycelium-tools 2>/dev/null
+            ;;
+        show)
+            local name="${1:-}"
+            [ -z "$name" ] && die "usage: mycelium tool show <name>"
+            nats kv get --server="$NATS_URL" mycelium-tools "$name" --raw
+            ;;
+        *) die "usage: mycelium tool list | mycelium tool show <name>" ;;
+    esac
+}
+
 cmd_status() {
     $SUDO systemctl --no-pager --lines 0 status mycelium-nats mycelium-host || true
     echo "--- /health ---"
@@ -177,7 +192,16 @@ cmd_agent() {
             [ -z "$id" ] && die "usage: mycelium agent delete <id>"
             curl -sf -X DELETE -H "host: $HOSTHDR" "$API/agents/$id" && echo
             ;;
-        *) die "agent subcommand: create|list|delete" ;;
+        set-tools)
+            local id="${1:-}" csv="${2:-}"
+            [ -z "$id" ] || [ -z "$csv" ] && die "usage: mycelium agent set-tools <id> <tool,tool,...>"
+            local current
+            current=$(curl -sf -H "host: $HOSTHDR" "$API/agents/$id") || die "agent $id not found"
+            local merged
+            merged=$(python3 -c "import json,sys;a=json.loads(sys.argv[1]);a['tools']=sys.argv[2].split(',') if sys.argv[2] else [];print(json.dumps(a))" "$current" "$csv")
+            curl -sf -X PATCH -H "host: $HOSTHDR" -H 'content-type: application/json' -d "$merged" "$API/agents/$id" && echo
+            ;;
+        *) die "agent subcommand: create|list|delete|set-tools" ;;
     esac
 }
 
@@ -385,6 +409,9 @@ Commands:
   agent create <id> [--name=N --prompt=P --model=M --tools=a,b --max-steps=N]
   agent list
   agent delete <id>
+  agent set-tools <id> <tool,tool,...>
+  tool list
+  tool show <name>
   chat <agent-id> <text>
 EOF
 }
@@ -401,6 +428,7 @@ main() {
         restart)      log "Restarting mycelium-host (workloads will redeploy)"; $SUDO systemctl restart mycelium-host; sleep 3; redeploy ;;
         redeploy)     redeploy ;;
         agent)        cmd_agent "$@" ;;
+        tool)         cmd_tool "$@" ;;
         chat)         cmd_chat "$@" ;;
         config)
             local sub="${1:-}"; shift || true

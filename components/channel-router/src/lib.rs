@@ -263,11 +263,40 @@ fn try_slash_command(chat_id: &str, text: &str) -> bool {
             true
         }
         "/tools" => {
-            send("no tools registered (phase D pending).");
+            send(&list_registered_tools());
             true
         }
         _ => false,
     }
+}
+
+fn list_registered_tools() -> String {
+    let Ok(bucket) = wasi::keyvalue::store::open("mycelium-tools") else {
+        return "tool registry unavailable.".to_string();
+    };
+    let keys = match bucket.list_keys(None) {
+        Ok(r) => r.keys,
+        Err(_) => return "tool registry list failed.".to_string(),
+    };
+    if keys.is_empty() {
+        return "no tools registered.".to_string();
+    }
+    let mut out = String::from("registered tools:\n");
+    for k in &keys {
+        let desc = bucket
+            .get(k)
+            .ok()
+            .flatten()
+            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+            .and_then(|v| v.get("description").and_then(|d| d.as_str()).map(|s| s.to_string()))
+            .unwrap_or_default();
+        if desc.is_empty() {
+            out.push_str(&format!("- {k}\n"));
+        } else {
+            out.push_str(&format!("- {k} — {desc}\n"));
+        }
+    }
+    out
 }
 
 fn load_chat_agent(chat_id: &str) -> Option<String> {
