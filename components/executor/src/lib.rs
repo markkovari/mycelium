@@ -80,6 +80,8 @@ fn cfg(key: &str) -> Option<String> {
 struct PendingTask {
     channel: String,
     chat_id: String,
+    #[serde(default)]
+    conversation_id: String,
 }
 
 fn load_pending(task_id: &str) -> Option<PendingTask> {
@@ -186,6 +188,16 @@ impl exports::wasmcloud::messaging::handler::Guest for Component {
                 }
                 if let Some(text) = reply_text {
                     if let Some(pending) = load_pending(&res.task_id) {
+                        // Persist the assistant reply so the next user message
+                        // sees it in conversation history.
+                        if !pending.conversation_id.is_empty() {
+                            let _ = mycelium::conversation::conversations::append_message(
+                                &pending.conversation_id,
+                                mycelium::types::types::MessageRole::Assistant,
+                                &text,
+                                None,
+                            );
+                        }
                         if pending.channel == "telegram" {
                             if let Some(token) = cfg("telegram.bot_token") {
                                 let _ =

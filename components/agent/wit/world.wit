@@ -19,4 +19,5 @@ world agent {
     import mycelium:agent/agent-step@0.1.0;
     import mycelium:memory/memory@0.1.0;
     import mycelium:tool/tool-registry@0.1.0;
+    import mycelium:conversation/conversations@0.1.0;
 }

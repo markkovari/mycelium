@@ -65,17 +65,8 @@ fn pick_default_agent() -> Option<String> {
 struct PendingTask {
     channel: String,
     chat_id: String,
-}
-
-fn save_pending(task_id: &str, channel: &str, chat_id: &str) {
-    let Ok(bucket) = wasi::keyvalue::store::open(PENDING_BUCKET) else { return };
-    let pt = PendingTask {
-        channel: channel.to_string(),
-        chat_id: chat_id.to_string(),
-    };
-    if let Ok(bytes) = serde_json::to_vec(&pt) {
-        let _ = bucket.set(task_id, &bytes);
-    }
+    #[serde(default)]
+    conversation_id: String,
 }
 
 fn load_pending(task_id: &str) -> Option<PendingTask> {
@@ -230,8 +221,40 @@ fn handle_telegram_raw(body: &[u8]) {
         let _ = telegram_chat_action(&token, &chat_id, "typing");
     }
 
+    // Stable conv_id per chat — load if exists, otherwise create.
+    let conv_id = match load_chat_conv(&chat_id) {
+        Some(id) => id,
+        None => {
+            match mycelium::conversation::conversations::create(&agent_id, None) {
+                Ok(c) => {
+                    save_chat_conv(&chat_id, &c.id);
+                    c.id
+                }
+                Err(e) => {
+                    log(
+                        wasi::logging::logging::Level::Warn,
+                        &format!("conversations::create failed: {e:?}"),
+                    );
+                    return;
+                }
+            }
+        }
+    };
+
+    // Append user message so the agent can read full history on the next step.
+    if let Err(e) = mycelium::conversation::conversations::append_message(
+        &conv_id,
+        mycelium::types::types::MessageRole::User,
+        text,
+        None,
+    ) {
+        log(
+            wasi::logging::logging::Level::Warn,
+            &format!("append user message failed: {e:?}"),
+        );
+    }
+
     let task_id = random_uuid_v4();
-    let conv_id = random_uuid_v4();
     let task = json!({
         "id": task_id,
         "conversation_id": conv_id,
@@ -239,9 +262,33 @@ fn handle_telegram_raw(body: &[u8]) {
         "input": text,
         "created_at": now_iso(),
     });
-    save_pending(&task_id, "telegram", &chat_id);
+    save_pending_full(&task_id, "telegram", &chat_id, &conv_id);
     if let Ok(bytes) = serde_json::to_vec(&task) {
         publish(TASK_SUBMIT, bytes);
+    }
+}
+
+fn load_chat_conv(chat_id: &str) -> Option<String> {
+    let bucket = wasi::keyvalue::store::open(PENDING_BUCKET).ok()?;
+    let bytes = bucket.get(&format!("conv/{chat_id}")).ok().flatten()?;
+    String::from_utf8(bytes).ok()
+}
+
+fn save_chat_conv(chat_id: &str, conv_id: &str) {
+    if let Ok(bucket) = wasi::keyvalue::store::open(PENDING_BUCKET) {
+        let _ = bucket.set(&format!("conv/{chat_id}"), conv_id.as_bytes());
+    }
+}
+
+fn save_pending_full(task_id: &str, channel: &str, chat_id: &str, conversation_id: &str) {
+    let Ok(bucket) = wasi::keyvalue::store::open(PENDING_BUCKET) else { return };
+    let pt = json!({
+        "channel": channel,
+        "chat_id": chat_id,
+        "conversation_id": conversation_id,
+    });
+    if let Ok(bytes) = serde_json::to_vec(&pt) {
+        let _ = bucket.set(task_id, &bytes);
     }
 }
 

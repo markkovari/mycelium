@@ -35,4 +35,5 @@ world = "agent"
 "mycelium:agent" = { path = "wit/deps/mycelium-agent-0.1.0" }
 "mycelium:memory" = { path = "wit/deps/mycelium-memory-0.1.0" }
 "mycelium:tool" = { path = "wit/deps/mycelium-tool-0.1.0" }
+"mycelium:conversation" = { path = "wit/deps/mycelium-conversation-0.1.0" }
 "wasi:cli" = { path = "wit/deps/wasi-cli-0.2.2" }

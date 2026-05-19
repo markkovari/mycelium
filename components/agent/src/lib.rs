@@ -100,14 +100,14 @@ fn do_request(
     model: &str,
     url: &ParsedUrl,
     api_key: Option<&str>,
-    prompt: &str,
+    messages: &[Value],
 ) -> Result<(u16, Vec<u8>), String> {
     use wasi::http::outgoing_handler;
     use wasi::http::types::{Fields, Method, OutgoingBody, OutgoingRequest};
 
     let body = json!({
         "model": model,
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": messages,
         "stream": false,
     });
     let body_bytes = serde_json::to_vec(&body).map_err(|e| e.to_string())?;
@@ -196,7 +196,7 @@ fn call_llm(
     model: &str,
     endpoint: &str,
     api_key: Option<String>,
-    prompt: &str,
+    messages: &[Value],
 ) -> Result<String, String> {
     const MAX_ATTEMPTS: u32 = 4;
     const MAX_DELAY_S: u64 = 60;
@@ -205,7 +205,7 @@ fn call_llm(
     let mut attempt = 0u32;
     loop {
         attempt += 1;
-        let (status, body) = do_request(model, &url, key, prompt)?;
+        let (status, body) = do_request(model, &url, key, messages)?;
         if status == 200 {
             let parsed: Value = serde_json::from_slice(&body).map_err(|e| e.to_string())?;
             return Ok(parsed
@@ -257,8 +257,30 @@ impl exports::wasmcloud::messaging::handler::Guest for Component {
                     .as_ref()
                     .map(|s| s.system_prompt.clone())
                     .unwrap_or_else(|| format!("You are mycelium agent {}.", req.agent_id));
-                let prompt = format!("{system_prompt}\n\n(conversation {})", req.conversation_id);
-                let (output, error) = match call_llm(&model, &endpoint, api_key, &prompt) {
+
+                // Build OpenAI-style message array: system prompt + full history.
+                let mut messages = vec![json!({"role": "system", "content": system_prompt})];
+                match mycelium::conversation::conversations::get_messages(&req.conversation_id) {
+                    Ok(history) => {
+                        for m in history {
+                            let role = match m.role {
+                                mycelium::types::types::MessageRole::System => "system",
+                                mycelium::types::types::MessageRole::User => "user",
+                                mycelium::types::types::MessageRole::Assistant => "assistant",
+                                mycelium::types::types::MessageRole::Tool => "tool",
+                            };
+                            messages.push(json!({"role": role, "content": m.content}));
+                        }
+                    }
+                    Err(e) => {
+                        wasi::logging::logging::log(
+                            wasi::logging::logging::Level::Warn,
+                            "agent",
+                            &format!("get_messages failed: {e:?}"),
+                        );
+                    }
+                };
+                let (output, error) = match call_llm(&model, &endpoint, api_key, &messages) {
                     Ok(content) => (Some(content), None),
                     Err(e) => (None, Some(e)),
                 };

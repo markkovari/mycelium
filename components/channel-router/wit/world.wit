@@ -29,4 +29,5 @@ world channel-router {
 
     import mycelium:types/types@0.1.0;
     import mycelium:agent/agent-registry@0.1.0;
+    import mycelium:conversation/conversations@0.1.0;
 }

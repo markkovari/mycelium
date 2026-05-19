@@ -31,3 +31,4 @@ world = "channel-router"
 "wasmcloud:messaging" = { path = "wit/deps/wasmcloud-messaging-0.2.0" }
 "mycelium:types"      = { path = "wit/deps/mycelium-types-0.1.0" }
 "mycelium:agent"      = { path = "wit/deps/mycelium-agent-0.1.0" }
+"mycelium:conversation" = { path = "wit/deps/mycelium-conversation-0.1.0" }
