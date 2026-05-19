@@ -33,6 +33,7 @@ COMPONENTS=(
     gateway executor agent tool-runner memory-store conversation-store
     router event-logger telegram-poller telegram-out channel-router
     session-bridge agent-registry task-publisher
+    tool-time tool-calc tool-web-fetch
 )
 
 # ── Helpers ──────────────────────────────────────────────────────────────────

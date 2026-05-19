@@ -1,0 +1,8 @@
+package mycelium:tool-calc@0.1.0;
+
+world tool-calc {
+    export wasmcloud:messaging/handler@0.2.0;
+
+    import wasmcloud:messaging/consumer@0.2.0;
+    import wasi:logging/logging@0.1.0-draft;
+}

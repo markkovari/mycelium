@@ -25,12 +25,33 @@ struct TaskJson {
     created_at: String,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+struct ToolCallSpec {
+    id: String,
+    name: String,
+    arguments: String,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct ToolResultRec {
+    id: String,
+    name: String,
+    output: Option<String>,
+    error: Option<String>,
+}
+
 #[derive(Serialize, Deserialize)]
 struct TaskStateJson {
     task: TaskJson,
     status: String,
     output: Option<String>,
     error: Option<String>,
+    #[serde(default)]
+    step: u32,
+    #[serde(default)]
+    pending_tool_calls: Vec<ToolCallSpec>,
+    #[serde(default)]
+    tool_results: Vec<ToolResultRec>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -155,6 +176,9 @@ impl exports::wasmcloud::messaging::handler::Guest for Component {
                     status: "running".into(),
                     output: None,
                     error: None,
+                    step: 0,
+                    pending_tool_calls: Vec::new(),
+                    tool_results: Vec::new(),
                 };
                 save_state(&state)?;
 
@@ -165,6 +189,120 @@ impl exports::wasmcloud::messaging::handler::Guest for Component {
                 };
                 let step_body = serde_json::to_vec(&step).map_err(|e| e.to_string())?;
                 publish("mycelium.task.step.agent", step_body)?;
+                Ok(())
+            }
+            "mycelium.step.tool-calls" => {
+                let req: serde_json::Value =
+                    serde_json::from_slice(&body).map_err(|e| format!("decode tc: {e}"))?;
+                let task_id = req
+                    .get("task_id")
+                    .and_then(|v| v.as_str())
+                    .ok_or("no task_id")?
+                    .to_string();
+                let Some(mut state) = load_state(&task_id)? else { return Ok(()) };
+                // max-step guard. Stored agent.max_steps would be authoritative;
+                // for now hardcode 4 to match the default.
+                if state.step >= 4 {
+                    state.status = "failed".into();
+                    state.error = Some("max steps exceeded".into());
+                    save_state(&state)?;
+                    let res = serde_json::json!({
+                        "task_id": task_id,
+                        "output": null,
+                        "error": "max steps exceeded",
+                    });
+                    publish("mycelium.step.result", serde_json::to_vec(&res).map_err(|e| e.to_string())?)?;
+                    return Ok(());
+                }
+                let calls_v = req.get("calls").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+                let mut calls = Vec::new();
+                for c in &calls_v {
+                    let id = c.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let name = c.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let arguments = c.get("arguments").and_then(|v| v.as_str()).unwrap_or("{}").to_string();
+                    if !name.is_empty() {
+                        calls.push(ToolCallSpec { id, name, arguments });
+                    }
+                }
+                state.pending_tool_calls = calls.clone();
+                state.tool_results.clear();
+                state.status = "waiting_tools".into();
+                state.step += 1;
+                save_state(&state)?;
+                for c in &calls {
+                    let payload = serde_json::json!({
+                        "task_id": task_id,
+                        "call_id": c.id,
+                        "arguments": c.arguments,
+                    });
+                    publish(
+                        &format!("mycelium.tool.call.{}", c.name),
+                        serde_json::to_vec(&payload).map_err(|e| e.to_string())?,
+                    )?;
+                }
+                Ok(())
+            }
+            "mycelium.tool.result" => {
+                let req: serde_json::Value =
+                    serde_json::from_slice(&body).map_err(|e| format!("decode tr: {e}"))?;
+                let task_id = req
+                    .get("task_id")
+                    .and_then(|v| v.as_str())
+                    .ok_or("no task_id")?
+                    .to_string();
+                let call_id = req
+                    .get("call_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let Some(mut state) = load_state(&task_id)? else { return Ok(()) };
+                // Look up which tool produced this so we can label the message.
+                let name = state
+                    .pending_tool_calls
+                    .iter()
+                    .find(|p| p.id == call_id)
+                    .map(|p| p.name.clone())
+                    .unwrap_or_else(|| "unknown".to_string());
+                let output = req.get("output").and_then(|v| v.as_str()).map(|s| s.to_string());
+                let error = req.get("error").and_then(|v| v.as_str()).map(|s| s.to_string());
+                state.tool_results.push(ToolResultRec { id: call_id, name, output, error });
+                let done = state.tool_results.len() >= state.pending_tool_calls.len();
+                save_state(&state)?;
+                if !done {
+                    return Ok(());
+                }
+                // All results in — fold them into conversation as tool messages,
+                // then re-arm the agent step.
+                if let Some(pending) = load_pending(&task_id) {
+                    if !pending.conversation_id.is_empty() {
+                        for r in &state.tool_results {
+                            let content = match (&r.output, &r.error) {
+                                (Some(o), _) => o.clone(),
+                                (_, Some(e)) => format!("(tool error: {e})"),
+                                _ => String::new(),
+                            };
+                            let _ = mycelium::conversation::conversations::append_message(
+                                &pending.conversation_id,
+                                mycelium::types::types::MessageRole::Tool,
+                                &content,
+                                Some(&r.id),
+                            );
+                        }
+                    }
+                }
+                // Clear pending; tool_results cleared on next tool-calls.
+                state.pending_tool_calls.clear();
+                state.status = "running".into();
+                save_state(&state)?;
+                let step = StepRequest {
+                    task_id: &task_id,
+                    conversation_id: &state.task.conversation_id,
+                    agent_id: &state.task.agent_id,
+                };
+                publish(
+                    "mycelium.task.step.agent",
+                    serde_json::to_vec(&step).map_err(|e| e.to_string())?,
+                )?;
                 Ok(())
             }
             "mycelium.step.result" => {

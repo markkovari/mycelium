@@ -1,0 +1,12 @@
+package mycelium:tool-web-fetch@0.1.0;
+
+world tool-web-fetch {
+    export wasmcloud:messaging/handler@0.2.0;
+
+    import wasmcloud:messaging/consumer@0.2.0;
+    import wasi:logging/logging@0.1.0-draft;
+    import wasi:http/outgoing-handler@0.2.2;
+    import wasi:http/types@0.2.2;
+    import wasi:io/streams@0.2.2;
+    import wasi:io/poll@0.2.2;
+}

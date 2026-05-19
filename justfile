@@ -7,7 +7,7 @@ oci_registry := env_var_or_default("OCI_REGISTRY", "localhost:5001/mycelium")
 image_tag    := env_var_or_default("IMAGE_TAG", "dev")
 http_addr    := env_var_or_default("HTTP_ADDR", "0.0.0.0:8080")
 
-components := "gateway executor agent tool-runner memory-store conversation-store router event-logger telegram-poller telegram-out channel-router session-bridge agent-registry task-publisher"
+components := "gateway executor agent tool-runner memory-store conversation-store router event-logger telegram-poller telegram-out channel-router session-bridge agent-registry task-publisher tool-time tool-calc tool-web-fetch"
 
 default:
     @just --list
@@ -88,6 +88,9 @@ push-oci:
             session-bridge) file=session_bridge ;;
             agent-registry) file=agent_registry ;;
             task-publisher) file=task_publisher ;;
+            tool-time) file=tool_time ;;
+            tool-calc) file=tool_calc ;;
+            tool-web-fetch) file=tool_web_fetch ;;
             *) file="$comp" ;;
         esac
         insecure=""

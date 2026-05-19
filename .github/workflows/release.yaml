@@ -41,6 +41,9 @@ jobs:
           - { dir: session-bridge,      file: session_bridge }
           - { dir: agent-registry,      file: agent_registry }
           - { dir: task-publisher,      file: task_publisher }
+          - { dir: tool-time,           file: tool_time }
+          - { dir: tool-calc,           file: tool_calc }
+          - { dir: tool-web-fetch,      file: tool_web_fetch }
 
     steps:
       - uses: actions/checkout@v4

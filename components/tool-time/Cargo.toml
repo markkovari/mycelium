@@ -1,0 +1,26 @@
+[package]
+name              = "tool-time"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wit-bindgen = { workspace = true }
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+
+[package.metadata.component]
+package = "mycelium:tool-time"
+
+[package.metadata.component.target]
+path  = "wit"
+world = "tool-time"
+
+[package.metadata.component.target.dependencies]
+"wasi:logging"        = { path = "wit/deps/wasi-logging-0.1.0-draft" }
+"wasi:clocks"         = { path = "wit/deps/wasi-clocks-0.2.2" }
+"wasi:io"             = { path = "wit/deps/wasi-io-0.2.2" }
+"wasmcloud:messaging" = { path = "wit/deps/wasmcloud-messaging-0.2.0" }

@@ -183,12 +183,15 @@ WORKLOADS=(
     "mycelium-channel-router;channel-router;channel-router,agent-registry,conversation-store;wasi:keyvalue:store|wasi:config:store${CHANNEL_CFG:+:}${CHANNEL_CFG}|wasi:logging:logging|wasi:http:outgoing-handler|wasmcloud:messaging:consumer,handler,types:subscriptions=mycelium.channel.telegram.raw;${POOL_SIZE_DEFAULT}"
     "mycelium-telegram-out;telegram-out;telegram-out;wasi:config:store${TELEGRAM_CFG:+:}${TELEGRAM_CFG}|wasi:logging:logging|wasmcloud:messaging:consumer,handler,types:subscriptions=mycelium.channel.telegram.out.>;${POOL_SIZE_DEFAULT}"
     "mycelium-pairing;pairing;session-bridge;wasi:keyvalue:store|wasi:logging:logging|wasmcloud:messaging:consumer,handler,types:subscriptions=mycelium.pair.>;${POOL_SIZE_DEFAULT}"
-    "mycelium-executor;executor;executor,conversation-store;wasi:keyvalue:store|wasi:config:store${TELEGRAM_CFG:+:}${TELEGRAM_CFG}|wasi:logging:logging|wasi:http:outgoing-handler|wasmcloud:messaging:consumer,handler,types:subscriptions=mycelium.task.submit,mycelium.step.result;${POOL_SIZE_DEFAULT}"
-    "mycelium-agent;agent;agent,conversation-store;wasi:keyvalue:store|wasi:config:store${AGENT_CFG:+:}${AGENT_CFG}|wasi:logging:logging|wasi:http:outgoing-handler|wasmcloud:messaging:consumer,handler,types:subscriptions=mycelium.task.step.agent,mycelium.tool.result;${POOL_SIZE_AGENT}"
+    "mycelium-executor;executor;executor,conversation-store;wasi:keyvalue:store|wasi:config:store${TELEGRAM_CFG:+:}${TELEGRAM_CFG}|wasi:logging:logging|wasi:http:outgoing-handler|wasmcloud:messaging:consumer,handler,types:subscriptions=mycelium.task.submit,mycelium.step.result,mycelium.step.tool-calls,mycelium.tool.result;${POOL_SIZE_DEFAULT}"
+    "mycelium-agent;agent;agent,conversation-store;wasi:keyvalue:store|wasi:config:store${AGENT_CFG:+:}${AGENT_CFG}|wasi:logging:logging|wasi:http:outgoing-handler|wasmcloud:messaging:consumer,handler,types:subscriptions=mycelium.task.step.agent;${POOL_SIZE_AGENT}"
     "mycelium-tools;tools;tool-runner;wasi:keyvalue:store|wasi:logging:logging|wasmcloud:messaging:consumer,handler,types:subscriptions=mycelium.tool.call;${POOL_SIZE_TOOLS}"
     "mycelium-memory;memory;memory-store;wasi:keyvalue:store|wasi:logging:logging|wasmcloud:messaging:consumer,handler,types:subscriptions=mycelium.memory.>;${POOL_SIZE_DEFAULT}"
     "mycelium-router;router;router;wasi:keyvalue:store|wasi:logging:logging|wasmcloud:messaging:consumer,handler,types:subscriptions=mycelium.event.>;${POOL_SIZE_DEFAULT}"
     "mycelium-events;events;event-logger;wasi:keyvalue:store|wasi:logging:logging|wasmcloud:messaging:consumer,handler,types:subscriptions=mycelium.event.>;${POOL_SIZE_DEFAULT}"
+    "mycelium-tool-time;tool-time;tool-time;wasi:logging:logging|wasmcloud:messaging:consumer,handler,types:subscriptions=mycelium.tool.call.time;${POOL_SIZE_DEFAULT}"
+    "mycelium-tool-calc;tool-calc;tool-calc;wasi:logging:logging|wasmcloud:messaging:consumer,handler,types:subscriptions=mycelium.tool.call.calc;${POOL_SIZE_DEFAULT}"
+    "mycelium-tool-web-fetch;tool-web-fetch;tool-web-fetch;wasi:logging:logging|wasi:http:outgoing-handler|wasmcloud:messaging:consumer,handler,types:subscriptions=mycelium.tool.call.web_fetch;${POOL_SIZE_DEFAULT}"
 )
 
 case "${1:-deploy}" in

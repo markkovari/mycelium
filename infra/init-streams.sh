@@ -53,6 +53,19 @@ create_kv mycelium-channel-sessions
 create_kv mycelium-events-journal  1
 create_kv mycelium-telegram-poller-state
 create_kv mycelium-channel-pending
+create_kv mycelium-tools
+
+echo ""
+echo "Seeding default tool schemas (mycelium-tools KV)..."
+nats kv put --server="$NATS_URL" mycelium-tools time \
+  '{"description":"Get the current UTC date and time as ISO 8601.","parameters":{"type":"object","properties":{},"required":[]}}' \
+  >/dev/null 2>&1 || true
+nats kv put --server="$NATS_URL" mycelium-tools calc \
+  '{"description":"Evaluate a simple arithmetic expression with + - * / ( ) sqrt() abs().","parameters":{"type":"object","properties":{"expr":{"type":"string","description":"The expression to evaluate, e.g. (17*23)+sqrt(81)"}},"required":["expr"]}}' \
+  >/dev/null 2>&1 || true
+nats kv put --server="$NATS_URL" mycelium-tools web_fetch \
+  '{"description":"GET an HTTP/HTTPS URL and return up to 4 KB of the response body.","parameters":{"type":"object","properties":{"url":{"type":"string","description":"Absolute URL to fetch."}},"required":["url"]}}' \
+  >/dev/null 2>&1 || true
 
 echo ""
 echo "Done. Run \`wash app deploy wadm/local.yaml\` to start components."

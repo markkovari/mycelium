@@ -63,6 +63,33 @@ fn load_agent_config(agent_id: &str) -> Option<StoredAgentConfig> {
     serde_json::from_slice(&bytes).ok()
 }
 
+/// For each name in `wanted`, look up its JSON schema in `mycelium-tools`
+/// KV and produce an OpenAI tools[] entry. Missing entries are skipped.
+fn load_tool_specs(wanted: &[String]) -> Vec<Value> {
+    if wanted.is_empty() {
+        return Vec::new();
+    }
+    let Ok(bucket) = wasi::keyvalue::store::open("mycelium-tools") else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for name in wanted {
+        let Ok(Some(bytes)) = bucket.get(name) else { continue };
+        let Ok(spec) = serde_json::from_slice::<Value>(&bytes) else { continue };
+        let description = spec.get("description").cloned().unwrap_or_else(|| json!(""));
+        let parameters = spec.get("parameters").cloned().unwrap_or_else(|| json!({"type":"object"}));
+        out.push(json!({
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": description,
+                "parameters": parameters,
+            }
+        }));
+    }
+    out
+}
+
 fn publish(subject: &str, body: Vec<u8>) -> Result<(), String> {
     wasmcloud::messaging::consumer::publish(&wasmcloud::messaging::types::BrokerMessage {
         subject: subject.to_string(),
@@ -101,15 +128,20 @@ fn do_request(
     url: &ParsedUrl,
     api_key: Option<&str>,
     messages: &[Value],
+    tools: &[Value],
 ) -> Result<(u16, Vec<u8>), String> {
     use wasi::http::outgoing_handler;
     use wasi::http::types::{Fields, Method, OutgoingBody, OutgoingRequest};
 
-    let body = json!({
+    let mut body = json!({
         "model": model,
         "messages": messages,
         "stream": false,
     });
+    if !tools.is_empty() {
+        body["tools"] = Value::Array(tools.to_vec());
+        body["tool_choice"] = json!("auto");
+    }
     let body_bytes = serde_json::to_vec(&body).map_err(|e| e.to_string())?;
 
     let headers = Fields::new();
@@ -192,12 +224,27 @@ fn sleep_seconds(s: u64) {
     p.block();
 }
 
+/// One assistant turn from the LLM. Either a plain text reply or a set of
+/// tool calls the agent should dispatch.
+pub enum LlmReply {
+    Text(String),
+    Tools(Vec<ToolCall>),
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct ToolCall {
+    pub id: String,
+    pub name: String,
+    pub arguments: String, // raw JSON string as Gemini/OpenAI emit it
+}
+
 fn call_llm(
     model: &str,
     endpoint: &str,
     api_key: Option<String>,
     messages: &[Value],
-) -> Result<String, String> {
+    tools: &[Value],
+) -> Result<LlmReply, String> {
     const MAX_ATTEMPTS: u32 = 4;
     const MAX_DELAY_S: u64 = 60;
     let url = parse_url(endpoint)?;
@@ -205,14 +252,41 @@ fn call_llm(
     let mut attempt = 0u32;
     loop {
         attempt += 1;
-        let (status, body) = do_request(model, &url, key, messages)?;
+        let (status, body) = do_request(model, &url, key, messages, tools)?;
         if status == 200 {
             let parsed: Value = serde_json::from_slice(&body).map_err(|e| e.to_string())?;
-            return Ok(parsed
+            // Prefer tool_calls if present.
+            if let Some(arr) = parsed
+                .pointer("/choices/0/message/tool_calls")
+                .and_then(|v| v.as_array())
+            {
+                let mut calls = Vec::new();
+                for c in arr {
+                    let id = c.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let name = c
+                        .pointer("/function/name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let arguments = c
+                        .pointer("/function/arguments")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("{}")
+                        .to_string();
+                    if !name.is_empty() {
+                        calls.push(ToolCall { id, name, arguments });
+                    }
+                }
+                if !calls.is_empty() {
+                    return Ok(LlmReply::Tools(calls));
+                }
+            }
+            let content = parsed
                 .pointer("/choices/0/message/content")
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
-                .to_string());
+                .to_string();
+            return Ok(LlmReply::Text(content));
         }
         let retryable = status == 429 || (500..600).contains(&status);
         if retryable && attempt < MAX_ATTEMPTS {
@@ -280,14 +354,36 @@ impl exports::wasmcloud::messaging::handler::Guest for Component {
                         );
                     }
                 };
-                let (output, error) = match call_llm(&model, &endpoint, api_key, &messages) {
-                    Ok(content) => (Some(content), None),
-                    Err(e) => (None, Some(e)),
-                };
+                // Build tools array for the LLM from agent.tools (names) +
+                // mycelium-tools KV (schema for each name).
+                let tool_names = stored.as_ref().map(|s| s.tools.clone()).unwrap_or_default();
+                let tool_specs = load_tool_specs(&tool_names);
+
+                let (out, err, tool_calls) =
+                    match call_llm(&model, &endpoint, api_key, &messages, &tool_specs) {
+                        Ok(LlmReply::Text(content)) => (Some(content), None, Vec::new()),
+                        Ok(LlmReply::Tools(calls)) => (None, None, calls),
+                        Err(e) => (None, Some(e), Vec::new()),
+                    };
+
+                if !tool_calls.is_empty() {
+                    let payload = json!({
+                        "task_id": req.task_id,
+                        "conversation_id": req.conversation_id,
+                        "agent_id": req.agent_id,
+                        "calls": tool_calls,
+                    });
+                    publish(
+                        "mycelium.step.tool-calls",
+                        serde_json::to_vec(&payload).map_err(|e| e.to_string())?,
+                    )?;
+                    return Ok(());
+                }
+
                 let result = StepResult {
                     task_id: req.task_id,
-                    output,
-                    error,
+                    output: out,
+                    error: err,
                 };
                 publish(
                     "mycelium.step.result",
