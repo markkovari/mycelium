@@ -52,6 +52,12 @@ struct TaskStateJson {
     pending_tool_calls: Vec<ToolCallSpec>,
     #[serde(default)]
     tool_results: Vec<ToolResultRec>,
+    #[serde(default)]
+    progress_message_id: i64,
+    #[serde(default)]
+    chat_id: String,
+    #[serde(default)]
+    max_steps: u32,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -173,6 +179,14 @@ fn maybe_update_bot_status(token: &str, rpm_used: u64, rpm_cap: u64, rpd_used: u
     }
 }
 
+fn progress_edit(state: &TaskStateJson, text: &str) {
+    if state.progress_message_id == 0 || state.chat_id.is_empty() {
+        return;
+    }
+    let Some(token) = cfg("telegram.bot_token") else { return };
+    let _ = telegram_edit(&token, &state.chat_id, state.progress_message_id, text);
+}
+
 fn read_counter(bucket: &wasi::keyvalue::store::Bucket, key: &str) -> u64 {
     bucket
         .get(key)
@@ -206,6 +220,72 @@ fn quota_snapshot() -> (u64, u64, u64, u64) {
         }
     }
     (rpm_used, rpm_cap, rpd_used, rpd_cap)
+}
+
+fn telegram_post(token: &str, method: &str, body: &serde_json::Value) -> Result<Vec<u8>, String> {
+    use wasi::http::outgoing_handler;
+    use wasi::http::types::{Fields, Method, OutgoingBody, OutgoingRequest, Scheme};
+    let body_bytes = serde_json::to_vec(body).map_err(|e| e.to_string())?;
+    let headers = Fields::new();
+    headers
+        .set("content-type", &[b"application/json".to_vec()])
+        .map_err(|e| format!("{e:?}"))?;
+    let req = OutgoingRequest::new(headers);
+    req.set_method(&Method::Post).map_err(|_| "method".to_string())?;
+    req.set_scheme(Some(&Scheme::Https)).map_err(|_| "scheme".to_string())?;
+    req.set_authority(Some("api.telegram.org"))
+        .map_err(|_| "authority".to_string())?;
+    req.set_path_with_query(Some(&format!("/bot{token}/{method}")))
+        .map_err(|_| "path".to_string())?;
+    let outgoing = req.body().map_err(|_| "body".to_string())?;
+    {
+        let stream = outgoing.write().map_err(|_| "stream".to_string())?;
+        for chunk in body_bytes.chunks(4096) {
+            stream
+                .blocking_write_and_flush(chunk)
+                .map_err(|e| format!("{e:?}"))?;
+        }
+    }
+    OutgoingBody::finish(outgoing, None).map_err(|e| format!("{e:?}"))?;
+    let fut = outgoing_handler::handle(req, None).map_err(|e| format!("{e:?}"))?;
+    fut.subscribe().block();
+    let resp = fut
+        .get()
+        .ok_or("no resp")?
+        .map_err(|_| "consumed".to_string())?
+        .map_err(|e| format!("{e:?}"))?;
+    let incoming = resp.consume().map_err(|_| "no body".to_string())?;
+    let stream = incoming.stream().map_err(|_| "no stream".to_string())?;
+    let mut buf = Vec::new();
+    loop {
+        match stream.blocking_read(8192) {
+            Ok(c) if c.is_empty() => break,
+            Ok(c) => buf.extend_from_slice(&c),
+            Err(_) => break,
+        }
+    }
+    Ok(buf)
+}
+
+fn telegram_send_with_id(token: &str, chat_id: &str, text: &str) -> Result<i64, String> {
+    let body = serde_json::json!({"chat_id": chat_id, "text": text, "parse_mode": "Markdown"});
+    let bytes = telegram_post(token, "sendMessage", &body)?;
+    let parsed: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+    parsed
+        .pointer("/result/message_id")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| format!("no result.message_id in: {}", String::from_utf8_lossy(&bytes[..bytes.len().min(200)])))
+}
+
+fn telegram_edit(token: &str, chat_id: &str, message_id: i64, text: &str) -> Result<(), String> {
+    let body = serde_json::json!({
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "text": text,
+        "parse_mode": "Markdown",
+    });
+    let _ = telegram_post(token, "editMessageText", &body)?;
+    Ok(())
 }
 
 fn telegram_send(token: &str, chat_id: &str, text: &str) -> Result<(), String> {
@@ -262,6 +342,19 @@ impl exports::wasmcloud::messaging::handler::Guest for Component {
                 let task: TaskJson =
                     serde_json::from_slice(&body).map_err(|e| format!("decode task: {e}"))?;
 
+                // Look up chat_id from the pending entry (channel-router wrote it
+                // when the inbound raw arrived). Send a "thinking" placeholder
+                // and store its message_id so subsequent edits can update it.
+                let (chat_id, progress_message_id) = match load_pending(&task.id) {
+                    Some(p) if p.channel == "telegram" => {
+                        let mid = cfg("telegram.bot_token")
+                            .and_then(|tok| telegram_send_with_id(&tok, &p.chat_id, "🤔 thinking…").ok())
+                            .unwrap_or(0);
+                        (p.chat_id, mid)
+                    }
+                    _ => (String::new(), 0i64),
+                };
+
                 let state = TaskStateJson {
                     task: task.clone(),
                     status: "running".into(),
@@ -270,6 +363,11 @@ impl exports::wasmcloud::messaging::handler::Guest for Component {
                     step: 0,
                     pending_tool_calls: Vec::new(),
                     tool_results: Vec::new(),
+                    progress_message_id,
+                    chat_id,
+                    // max_steps gets refined later if we can read AgentConfig;
+                    // 4 is the safe default that matches the previous hardcoded cap.
+                    max_steps: 4,
                 };
                 save_state(&state)?;
 
@@ -319,6 +417,14 @@ impl exports::wasmcloud::messaging::handler::Guest for Component {
                 state.tool_results.clear();
                 state.status = "waiting_tools".into();
                 state.step += 1;
+                let max = if state.max_steps > 0 { state.max_steps } else { 4 };
+                let names: Vec<String> = calls.iter().map(|c| c.name.clone()).collect();
+                let label = if names.len() == 1 {
+                    format!("🔧 {}({})", names[0], &calls[0].arguments[..calls[0].arguments.len().min(80)])
+                } else {
+                    format!("🔧 calling {} tools: {}", names.len(), names.join(", "))
+                };
+                progress_edit(&state, &format!("{label}\n_step {}/{max}_", state.step));
                 save_state(&state)?;
                 for c in &calls {
                     let payload = serde_json::json!({
@@ -356,8 +462,23 @@ impl exports::wasmcloud::messaging::handler::Guest for Component {
                     .unwrap_or_else(|| "unknown".to_string());
                 let output = req.get("output").and_then(|v| v.as_str()).map(|s| s.to_string());
                 let error = req.get("error").and_then(|v| v.as_str()).map(|s| s.to_string());
-                state.tool_results.push(ToolResultRec { id: call_id, name, output, error });
+                state.tool_results.push(ToolResultRec { id: call_id, name: name.clone(), output: output.clone(), error: error.clone() });
                 let done = state.tool_results.len() >= state.pending_tool_calls.len();
+                let max = if state.max_steps > 0 { state.max_steps } else { 4 };
+                let preview = match (&output, &error) {
+                    (Some(o), _) => {
+                        let s = o.replace('\n', " ");
+                        format!("{} → {}", name, &s[..s.len().min(80)])
+                    }
+                    (_, Some(e)) => format!("{name} → error: {}", &e[..e.len().min(80)]),
+                    _ => format!("{name} → (empty)"),
+                };
+                if done {
+                    progress_edit(&state, &format!("📊 {preview}\n_step {}/{max} • thinking…_", state.step));
+                } else {
+                    let remaining = state.pending_tool_calls.len() - state.tool_results.len();
+                    progress_edit(&state, &format!("📊 {preview}\n_waiting for {remaining} more tools…_"));
+                }
                 save_state(&state)?;
                 if !done {
                     return Ok(());
@@ -440,11 +561,20 @@ impl exports::wasmcloud::messaging::handler::Guest for Component {
                         if pending.channel == "telegram" {
                             if let Some(token) = cfg("telegram.bot_token") {
                                 let (rpm_used, rpm_cap, rpd_used, rpd_cap) = quota_snapshot();
+                                let max = if let Some(st) = load_state(&res.task_id).ok().flatten() { st.max_steps.max(1) } else { 4 };
+                                let step = load_state(&res.task_id).ok().flatten().map(|s| s.step).unwrap_or(0);
                                 let footer = format!(
-                                    "_RPM {rpm_used}/{rpm_cap} • RPD {rpd_used}/{rpd_cap}_"
+                                    "_step {step}/{max} • RPM {rpm_used}/{rpm_cap} • RPD {rpd_used}/{rpd_cap}_"
                                 );
                                 let body = format!("{text}\n\n{footer}");
-                                let _ = telegram_send(&token, &pending.chat_id, &body);
+                                // Edit the progress placeholder if we have it,
+                                // otherwise fall back to a fresh send.
+                                let edited = load_state(&res.task_id).ok().flatten()
+                                    .filter(|s| s.progress_message_id != 0 && !s.chat_id.is_empty())
+                                    .and_then(|s| telegram_edit(&token, &s.chat_id, s.progress_message_id, &body).ok());
+                                if edited.is_none() {
+                                    let _ = telegram_send(&token, &pending.chat_id, &body);
+                                }
                                 maybe_update_bot_status(
                                     &token, rpm_used, rpm_cap, rpd_used, rpd_cap,
                                 );
