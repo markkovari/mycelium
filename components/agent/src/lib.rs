@@ -64,12 +64,11 @@ fn load_agent_config(agent_id: &str) -> Option<StoredAgentConfig> {
 }
 
 const RATE_BUCKET: &str = "mycelium-task-state";
-const DEFAULT_RPM: u64 = 20;
+const DEFAULT_RPM: u64 = 10;
+const DEFAULT_RPD: u64 = 200;
 
-/// Returns Ok(remaining) if budget allows the call, Err(over) if over budget
-/// for this wall-clock minute. wasi:config key `llm.rpm` overrides the cap;
-/// `llm.rpm=0` disables the gate.
-fn rate_check(agent_id: &str) -> Result<u64, u64> {
+/// Per-minute cap. wasi:config keys: llm.rpm (0 disables).
+fn rpm_check(agent_id: &str) -> Result<u64, u64> {
     let rpm: u64 = cfg("llm.rpm", &DEFAULT_RPM.to_string())
         .parse()
         .unwrap_or(DEFAULT_RPM);
@@ -78,7 +77,7 @@ fn rate_check(agent_id: &str) -> Result<u64, u64> {
     }
     let now = wasi::clocks::wall_clock::now();
     let minute = now.seconds / 60;
-    let key = format!("rate/{agent_id}/{minute}");
+    let key = format!("rate/{agent_id}/min/{minute}");
     let bucket = match wasi::keyvalue::store::open(RATE_BUCKET) {
         Ok(b) => b,
         Err(_) => return Ok(rpm),
@@ -90,6 +89,30 @@ fn rate_check(agent_id: &str) -> Result<u64, u64> {
         Err(count - rpm)
     }
 }
+
+/// Per-day cap. wasi:config keys: llm.rpd (0 disables).
+fn rpd_check(agent_id: &str) -> Result<u64, u64> {
+    let rpd: u64 = cfg("llm.rpd", &DEFAULT_RPD.to_string())
+        .parse()
+        .unwrap_or(DEFAULT_RPD);
+    if rpd == 0 {
+        return Ok(u64::MAX);
+    }
+    let now = wasi::clocks::wall_clock::now();
+    let day = now.seconds / 86_400;
+    let key = format!("rate/{agent_id}/day/{day}");
+    let bucket = match wasi::keyvalue::store::open(RATE_BUCKET) {
+        Ok(b) => b,
+        Err(_) => return Ok(rpd),
+    };
+    let count = wasi::keyvalue::atomics::increment(&bucket, &key, 1).unwrap_or(0);
+    if count <= rpd {
+        Ok(rpd - count)
+    } else {
+        Err(count - rpd)
+    }
+}
+
 
 const CIRCUIT_OPEN_UNTIL_KEY: &str = "circuit/open-until";
 const CIRCUIT_FAILS_KEY: &str = "circuit/fails";
@@ -450,8 +473,23 @@ impl exports::wasmcloud::messaging::handler::Guest for Component {
                     return Ok(());
                 }
 
-                // Rate cap: per-agent calls-per-minute.
-                if let Err(over) = rate_check(&req.agent_id) {
+                // Per-day cap (hard ceiling on paid-key cost).
+                if let Err(over) = rpd_check(&req.agent_id) {
+                    let result = StepResult {
+                        task_id: req.task_id,
+                        output: None,
+                        error: Some(format!(
+                            "daily LLM budget exceeded ({over} over cap); resets at UTC midnight"
+                        )),
+                    };
+                    publish(
+                        "mycelium.step.result",
+                        serde_json::to_vec(&result).map_err(|e| e.to_string())?,
+                    )?;
+                    return Ok(());
+                }
+                // Per-minute cap (smooths bursts).
+                if let Err(over) = rpm_check(&req.agent_id) {
                     let result = StepResult {
                         task_id: req.task_id,
                         output: None,
