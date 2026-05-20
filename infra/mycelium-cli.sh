@@ -132,6 +132,38 @@ cmd_model() {
     redeploy
 }
 
+cmd_budget() {
+    local sub="${1:-show}"; shift || true
+    case "$sub" in
+        show)
+            echo "current LLM budget caps:"
+            local rpm rpd
+            rpm=$($SUDO grep '^LLM_RPM=' "$SECRETS_FILE" 2>/dev/null | cut -d= -f2)
+            rpd=$($SUDO grep '^LLM_RPD=' "$SECRETS_FILE" 2>/dev/null | cut -d= -f2)
+            echo "  llm.rpm = ${rpm:-(default 10)}"
+            echo "  llm.rpd = ${rpd:-(default 200)}"
+            ;;
+        set)
+            local pair="${1:-}"
+            [ -z "$pair" ] && die "usage: mycelium budget set rpm=N | rpd=N"
+            local key="${pair%%=*}" val="${pair#*=}"
+            case "$key" in
+                rpm) set_secret "LLM_RPM" "$val"; log "LLM_RPM=$val"; redeploy ;;
+                rpd) set_secret "LLM_RPD" "$val"; log "LLM_RPD=$val"; redeploy ;;
+                *) die "key must be rpm or rpd" ;;
+            esac
+            ;;
+        reset)
+            log "Clearing all rate/circuit counters in mycelium-task-state"
+            for k in $(nats kv ls --server="$NATS_URL" mycelium-task-state 2>&1 | grep -E "^rate/|^circuit/|^agent-claim/"); do
+                nats kv del --server="$NATS_URL" mycelium-task-state "$k" -f >/dev/null 2>&1
+            done
+            log "done"
+            ;;
+        *) die "usage: mycelium budget [show | set rpm=N|rpd=N | reset]" ;;
+    esac
+}
+
 cmd_tool() {
     local sub="${1:-}"; shift || true
     case "$sub" in
@@ -412,6 +444,9 @@ Commands:
   agent set-tools <id> <tool,tool,...>
   tool list
   tool show <name>
+  budget show
+  budget set rpm=N|rpd=N
+  budget reset                 (clear all rate/circuit counters)
   chat <agent-id> <text>
 EOF
 }
@@ -429,6 +464,7 @@ main() {
         redeploy)     redeploy ;;
         agent)        cmd_agent "$@" ;;
         tool)         cmd_tool "$@" ;;
+        budget)       cmd_budget "$@" ;;
         chat)         cmd_chat "$@" ;;
         config)
             local sub="${1:-}"; shift || true

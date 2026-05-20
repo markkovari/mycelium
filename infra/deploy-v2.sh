@@ -161,7 +161,13 @@ build_cfg() {
     done
     printf '%s' "$out"
 }
-AGENT_CFG="$(build_cfg llm.endpoint "${LLM_ENDPOINT:-}" llm.model "${LLM_MODEL:-}" llm.api_key "${LLM_API_KEY:-}")"
+AGENT_CFG="$(build_cfg \
+    llm.endpoint "${LLM_ENDPOINT:-}" \
+    llm.model "${LLM_MODEL:-}" \
+    llm.api_key "${LLM_API_KEY:-}" \
+    llm.rpm "${LLM_RPM:-}" \
+    llm.rpd "${LLM_RPD:-}" \
+)"
 TELEGRAM_CFG="$(build_cfg telegram.bot_token "${TELEGRAM_BOT_TOKEN:-}")"
 # channel-router falls back to list_agents when default.agent_id is "auto" or
 # unset, but the messaging plugin only binds wasi:config when at least one key
