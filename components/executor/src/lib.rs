@@ -117,6 +117,62 @@ fn delete_pending(task_id: &str) -> Result<(), String> {
     bucket.delete(task_id).map_err(|e| format!("{e:?}"))
 }
 
+fn set_bot_short_description(token: &str, text: &str) -> Result<(), String> {
+    use wasi::http::outgoing_handler;
+    use wasi::http::types::{Fields, Method, OutgoingBody, OutgoingRequest, Scheme};
+    let body = serde_json::json!({"short_description": text});
+    let body_bytes = serde_json::to_vec(&body).map_err(|e| e.to_string())?;
+    let headers = Fields::new();
+    headers
+        .set("content-type", &[b"application/json".to_vec()])
+        .map_err(|e| format!("{e:?}"))?;
+    let req = OutgoingRequest::new(headers);
+    req.set_method(&Method::Post).map_err(|_| "method".to_string())?;
+    req.set_scheme(Some(&Scheme::Https)).map_err(|_| "scheme".to_string())?;
+    req.set_authority(Some("api.telegram.org"))
+        .map_err(|_| "authority".to_string())?;
+    req.set_path_with_query(Some(&format!("/bot{token}/setMyShortDescription")))
+        .map_err(|_| "path".to_string())?;
+    let outgoing = req.body().map_err(|_| "body".to_string())?;
+    {
+        let stream = outgoing.write().map_err(|_| "stream".to_string())?;
+        for chunk in body_bytes.chunks(4096) {
+            stream
+                .blocking_write_and_flush(chunk)
+                .map_err(|e| format!("{e:?}"))?;
+        }
+    }
+    OutgoingBody::finish(outgoing, None).map_err(|e| format!("{e:?}"))?;
+    let fut = outgoing_handler::handle(req, None).map_err(|e| format!("{e:?}"))?;
+    fut.subscribe().block();
+    let _ = fut
+        .get()
+        .ok_or("no resp")?
+        .map_err(|_| "consumed".to_string())?
+        .map_err(|e| format!("{e:?}"))?;
+    Ok(())
+}
+
+fn maybe_update_bot_status(token: &str, rpm_used: u64, rpm_cap: u64, rpd_used: u64, rpd_cap: u64) {
+    // Telegram rate-limits setMyShortDescription to ~1/min.
+    let Ok(bucket) = wasi::keyvalue::store::open("mycelium-task-state") else { return };
+    let now = wasi::clocks::wall_clock::now().seconds;
+    let last = bucket
+        .get("bot-status/last")
+        .ok()
+        .flatten()
+        .and_then(|b| std::str::from_utf8(&b).ok().map(|s| s.to_string()))
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(0);
+    if now < last + 65 {
+        return;
+    }
+    let txt = format!("today: {rpd_used}/{rpd_cap} calls • now: {rpm_used}/{rpm_cap} this minute");
+    if set_bot_short_description(token, &txt).is_ok() {
+        let _ = bucket.set("bot-status/last", now.to_string().as_bytes());
+    }
+}
+
 fn read_counter(bucket: &wasi::keyvalue::store::Bucket, key: &str) -> u64 {
     bucket
         .get(key)
@@ -127,11 +183,15 @@ fn read_counter(bucket: &wasi::keyvalue::store::Bucket, key: &str) -> u64 {
         .unwrap_or(0)
 }
 
-fn quota_footer() -> String {
+fn quota_snapshot() -> (u64, u64, u64, u64) {
     let now = wasi::clocks::wall_clock::now().seconds;
     let minute = now / 60;
     let day = now / 86_400;
-    let Ok(bucket) = wasi::keyvalue::store::open("mycelium-task-state") else { return String::new() };
+    let rpm_cap = cfg("llm.rpm").and_then(|s| s.parse::<u64>().ok()).unwrap_or(10);
+    let rpd_cap = cfg("llm.rpd").and_then(|s| s.parse::<u64>().ok()).unwrap_or(200);
+    let Ok(bucket) = wasi::keyvalue::store::open("mycelium-task-state") else {
+        return (0, rpm_cap, 0, rpd_cap);
+    };
     let keys = bucket.list_keys(None).map(|r| r.keys).unwrap_or_default();
     let mut rpm_used = 0u64;
     let mut rpd_used = 0u64;
@@ -145,9 +205,7 @@ fn quota_footer() -> String {
             rpd_used += read_counter(&bucket, k);
         }
     }
-    let rpm_cap = cfg("llm.rpm").and_then(|s| s.parse::<u64>().ok()).unwrap_or(10);
-    let rpd_cap = cfg("llm.rpd").and_then(|s| s.parse::<u64>().ok()).unwrap_or(200);
-    format!("_RPM {rpm_used}/{rpm_cap} • RPD {rpd_used}/{rpd_cap}_")
+    (rpm_used, rpm_cap, rpd_used, rpd_cap)
 }
 
 fn telegram_send(token: &str, chat_id: &str, text: &str) -> Result<(), String> {
@@ -381,13 +439,15 @@ impl exports::wasmcloud::messaging::handler::Guest for Component {
                         }
                         if pending.channel == "telegram" {
                             if let Some(token) = cfg("telegram.bot_token") {
-                                let footer = quota_footer();
-                                let body = if footer.is_empty() {
-                                    text.clone()
-                                } else {
-                                    format!("{text}\n\n{footer}")
-                                };
+                                let (rpm_used, rpm_cap, rpd_used, rpd_cap) = quota_snapshot();
+                                let footer = format!(
+                                    "_RPM {rpm_used}/{rpm_cap} • RPD {rpd_used}/{rpd_cap}_"
+                                );
+                                let body = format!("{text}\n\n{footer}");
                                 let _ = telegram_send(&token, &pending.chat_id, &body);
+                                maybe_update_bot_status(
+                                    &token, rpm_used, rpm_cap, rpd_used, rpd_cap,
+                                );
                             }
                         }
                         let _ = delete_pending(&res.task_id);
