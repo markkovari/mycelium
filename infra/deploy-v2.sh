@@ -92,7 +92,7 @@ build_component_array() {
         local image="${OCI_REGISTRY}/${name}:${IMAGE_TAG}"
         if [ $first -eq 1 ]; then first=0
         else out+=","; fi
-        out+="{\"image\":\"$image\",\"name\":\"$name\",\"image_pull_policy\":\"$PULL_POLICY\",\"pool_size\":${pool_size},\"max_invocations\":0}"
+        out+="{\"image\":\"$image\",\"name\":\"$name\",\"image_pull_policy\":\"$PULL_POLICY\",\"pool_size\":${pool_size},\"max_invocations\":${pool_size}}"
     done
     out+="]"
     echo "$out"
@@ -179,10 +179,14 @@ CHANNEL_CFG="$(build_cfg \
     llm.rpd "${LLM_RPD:-}" \
 )"
 
-# Per-workload pool_size (env-overridable).
-POOL_SIZE_API="${API_POOL_SIZE:-4}"
-POOL_SIZE_AGENT="${AGENT_POOL_SIZE:-8}"
-POOL_SIZE_TOOLS="${TOOLS_POOL_SIZE:-4}"
+# Per-workload pool_size. Doubles as the cap on concurrent handler invocations
+# (max_invocations = pool_size). Keep at 1 to serialize per workload — wash 2.1.0
+# fans NATS messages to every available instance in parallel, which creates
+# exponential tick storms and races every shared KV without atomics. Single-user
+# setup tolerates serial.
+POOL_SIZE_API="${API_POOL_SIZE:-1}"
+POOL_SIZE_AGENT="${AGENT_POOL_SIZE:-1}"
+POOL_SIZE_TOOLS="${TOOLS_POOL_SIZE:-1}"
 POOL_SIZE_DEFAULT="${POOL_SIZE_DEFAULT:-1}"
 
 # WORKLOADS = (workload_id;name;components;ifaces;pool_size)
