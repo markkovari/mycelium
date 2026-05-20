@@ -290,7 +290,15 @@ fn do_request(
     OutgoingBody::finish(outgoing_body, None).map_err(|e| format!("finish body: {e:?}"))?;
 
     let future_resp = outgoing_handler::handle(req, None).map_err(|e| format!("handle: {e:?}"))?;
-    future_resp.subscribe().block();
+    {
+        const HEADERS_TIMEOUT_NS: u64 = 30 * 1_000_000_000;
+        let resp_p = future_resp.subscribe();
+        let timeout_p = wasi::clocks::monotonic_clock::subscribe_duration(HEADERS_TIMEOUT_NS);
+        let ready = wasi::io::poll::poll(&[&resp_p, &timeout_p]);
+        if !ready.contains(&0u32) {
+            return Err("LLM request timed out waiting for response headers (30s)".into());
+        }
+    }
     let resp = future_resp
         .get()
         .ok_or("response missing".to_string())?
@@ -302,12 +310,28 @@ fn do_request(
     let stream = incoming_body
         .stream()
         .map_err(|_| "no body stream".to_string())?;
+    const BODY_TIMEOUT_NS: u64 = 45 * 1_000_000_000;
+    let deadline_ns = wasi::clocks::monotonic_clock::now().saturating_add(BODY_TIMEOUT_NS);
     let mut buf = Vec::new();
     loop {
-        match stream.blocking_read(8192) {
-            Ok(chunk) if chunk.is_empty() => break,
+        let now_ns = wasi::clocks::monotonic_clock::now();
+        if now_ns >= deadline_ns {
+            return Err("LLM response body read timed out (45s)".into());
+        }
+        let remaining = deadline_ns - now_ns;
+        let body_p = stream.subscribe();
+        let timeout_p = wasi::clocks::monotonic_clock::subscribe_duration(remaining);
+        let ready = wasi::io::poll::poll(&[&body_p, &timeout_p]);
+        drop(body_p);
+        drop(timeout_p);
+        if !ready.contains(&0u32) {
+            return Err("LLM response body read timed out (45s)".into());
+        }
+        match stream.read(8192) {
+            Ok(chunk) if chunk.is_empty() => continue,
             Ok(chunk) => buf.extend_from_slice(&chunk),
-            Err(_) => break,
+            Err(wasi::io::streams::StreamError::Closed) => break,
+            Err(e) => return Err(format!("read: {e:?}")),
         }
     }
     drop(stream);
