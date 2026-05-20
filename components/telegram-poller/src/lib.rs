@@ -71,6 +71,7 @@ fn publish(subject: &str, body: Vec<u8>) {
 /// acquired it. New invocations bail if a non-expired lease exists.
 /// 30s TTL guards against stuck holders without needing a real counter.
 const LOCK_TTL_S: u64 = 30;
+const TICK_REARM_COOLDOWN_S: u64 = 8;
 
 fn try_acquire_lock() -> bool {
     let Ok(bucket) = wasi::keyvalue::store::open(STATE_BUCKET) else { return false };
@@ -94,6 +95,27 @@ fn release_lock() {
         // Set to past timestamp so next acquire sees expired lease.
         let _ = bucket.delete("lock-until");
     }
+}
+
+/// Rate-limit tick re-arm across parallel pool instances. Lock acquisition is
+/// racy (check-then-set, no atomics), so several instances can simultaneously
+/// "win" and each fire its own re-arm — producing an exponential tick storm.
+/// Gate re-arm on a coarse last-rearm timestamp so at most one tick lands per
+/// cooldown window even if many instances fall through.
+fn try_claim_rearm() -> bool {
+    let Ok(bucket) = wasi::keyvalue::store::open(STATE_BUCKET) else { return false };
+    let now = wasi::clocks::wall_clock::now().seconds;
+    if let Ok(Some(bytes)) = bucket.get("last-rearm") {
+        if let Ok(s) = std::str::from_utf8(&bytes) {
+            if let Ok(prev) = s.parse::<u64>() {
+                if now.saturating_sub(prev) < TICK_REARM_COOLDOWN_S {
+                    return false;
+                }
+            }
+        }
+    }
+    let _ = bucket.set("last-rearm", now.to_string().as_bytes());
+    true
 }
 
 fn tick_once() {
@@ -160,9 +182,12 @@ fn tick_once() {
             sleep_ms(2_000);
         }
     }
-    // Re-arm the loop exactly once per completed tick.
     release_lock();
-    publish(TICK_SUBJECT, Vec::new());
+    // Re-arm the loop, but only once per cooldown window so parallel pool
+    // instances that all "won" the racy lock don't each fan out a fresh tick.
+    if try_claim_rearm() {
+        publish(TICK_SUBJECT, Vec::new());
+    }
 }
 
 struct Component;
