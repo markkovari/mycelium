@@ -91,7 +91,8 @@ fn try_acquire_lock() -> bool {
 
 fn release_lock() {
     if let Ok(bucket) = wasi::keyvalue::store::open(STATE_BUCKET) {
-        let _ = bucket.set("lock-until", b"0");
+        // Set to past timestamp so next acquire sees expired lease.
+        let _ = bucket.delete("lock-until");
     }
 }
 

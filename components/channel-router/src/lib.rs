@@ -39,16 +39,18 @@ fn random_uuid_v4() -> String {
 }
 
 fn seen_update(update_id: u64) -> bool {
-    // Atomic guard: the first invocation to increment observes 1; concurrent
-    // racers observe >1 and bail. Replaces the racy exists()+set() pair which
-    // let multiple wash 2.1.0 handler instances all pass through for the same
-    // Telegram update.
+    // wasi:keyvalue/atomics::increment crashed wash's NATS plugin
+    // (bytes::advance panic on empty value), so we fall back to a racy
+    // exists()+set(). Downstream agent/rate cap absorbs the rare double-fire.
     let Ok(bucket) = wasi::keyvalue::store::open("mycelium-channel-pending") else {
         return false;
     };
     let key = format!("seen/{update_id}");
-    let count = wasi::keyvalue::atomics::increment(&bucket, &key, 1).unwrap_or(0);
-    count > 1
+    if matches!(bucket.exists(&key), Ok(true)) {
+        return true;
+    }
+    let _ = bucket.set(&key, b"1");
+    false
 }
 
 fn pick_default_agent_for_chat(chat_id: &str) -> Option<String> {

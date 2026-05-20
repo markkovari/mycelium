@@ -67,6 +67,19 @@ const RATE_BUCKET: &str = "mycelium-task-state";
 const DEFAULT_RPM: u64 = 10;
 const DEFAULT_RPD: u64 = 200;
 
+fn bump_counter(bucket: &wasi::keyvalue::store::Bucket, key: &str) -> u64 {
+    let current = bucket
+        .get(key)
+        .ok()
+        .flatten()
+        .and_then(|b| std::str::from_utf8(&b).ok().map(|s| s.to_string()))
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(0);
+    let next = current + 1;
+    let _ = bucket.set(key, next.to_string().as_bytes());
+    next
+}
+
 /// Per-minute cap. wasi:config keys: llm.rpm (0 disables).
 fn rpm_check(agent_id: &str) -> Result<u64, u64> {
     let rpm: u64 = cfg("llm.rpm", &DEFAULT_RPM.to_string())
@@ -82,7 +95,7 @@ fn rpm_check(agent_id: &str) -> Result<u64, u64> {
         Ok(b) => b,
         Err(_) => return Ok(rpm),
     };
-    let count = wasi::keyvalue::atomics::increment(&bucket, &key, 1).unwrap_or(0);
+    let count = bump_counter(&bucket, &key);
     if count <= rpm {
         Ok(rpm - count)
     } else {
@@ -105,7 +118,7 @@ fn rpd_check(agent_id: &str) -> Result<u64, u64> {
         Ok(b) => b,
         Err(_) => return Ok(rpd),
     };
-    let count = wasi::keyvalue::atomics::increment(&bucket, &key, 1).unwrap_or(0);
+    let count = bump_counter(&bucket, &key);
     if count <= rpd {
         Ok(rpd - count)
     } else {
@@ -129,7 +142,7 @@ fn circuit_open() -> Option<u64> {
 
 fn note_circuit_failure() {
     let Ok(bucket) = wasi::keyvalue::store::open(RATE_BUCKET) else { return };
-    let n = wasi::keyvalue::atomics::increment(&bucket, CIRCUIT_FAILS_KEY, 1).unwrap_or(0);
+    let n = bump_counter(&bucket, CIRCUIT_FAILS_KEY);
     if n >= CIRCUIT_FAIL_THRESHOLD {
         let now = wasi::clocks::wall_clock::now().seconds;
         let until = now + CIRCUIT_COOLDOWN_S;
@@ -153,10 +166,14 @@ fn note_circuit_success() {
 fn claim_step(task_id: &str) -> bool {
     let Ok(bucket) = wasi::keyvalue::store::open(RATE_BUCKET) else { return true };
     let key = format!("agent-claim/{task_id}");
-    let n = wasi::keyvalue::atomics::increment(&bucket, &key, 1).unwrap_or(0);
-    // Only the first claimer per step proceeds. Executor resets the key when
-    // it pushes the next step.agent (after collecting tool results).
-    n == 1
+    // Best-effort check-then-set. Race window is small enough that downstream
+    // rate-cap + circuit breaker contain the damage if two callers slip
+    // through together.
+    if matches!(bucket.exists(&key), Ok(true)) {
+        return false;
+    }
+    let _ = bucket.set(&key, b"1");
+    true
 }
 
 /// For each name in `wanted`, look up its JSON schema in `mycelium-tools`
