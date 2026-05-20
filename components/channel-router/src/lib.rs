@@ -269,8 +269,50 @@ fn try_slash_command(chat_id: &str, text: &str) -> bool {
             send(&list_registered_tools());
             true
         }
+        "/quota" | "/budget" => {
+            send(&format_quota_for_chat());
+            true
+        }
         _ => false,
     }
+}
+
+fn format_quota_for_chat() -> String {
+    // The agent component writes its rate counters into mycelium-task-state
+    // under keys `rate/<agent>/{min,day}/<bucket>`. We don't know which agent
+    // is bound to this chat from here (cheap path), so we sum across all
+    // agents for the current minute / day and report.
+    let now = wasi::clocks::wall_clock::now();
+    let minute = now.seconds / 60;
+    let day = now.seconds / 86_400;
+    let bucket = match wasi::keyvalue::store::open("mycelium-task-state") {
+        Ok(b) => b,
+        Err(_) => return "(no rate state)".to_string(),
+    };
+    let keys = bucket.list_keys(None).map(|r| r.keys).unwrap_or_default();
+    let mut rpm_used = 0u64;
+    let mut rpd_used = 0u64;
+    for k in &keys {
+        if k.ends_with(&format!("/min/{minute}")) || k.contains(&format!("/min/{minute}")) {
+            if let Ok(Some(bytes)) = bucket.get(k) {
+                if let Ok(s) = std::str::from_utf8(&bytes) {
+                    rpm_used += s.parse::<u64>().unwrap_or(0);
+                }
+            }
+        }
+        if k.ends_with(&format!("/day/{day}")) || k.contains(&format!("/day/{day}")) {
+            if let Ok(Some(bytes)) = bucket.get(k) {
+                if let Ok(s) = std::str::from_utf8(&bytes) {
+                    rpd_used += s.parse::<u64>().unwrap_or(0);
+                }
+            }
+        }
+    }
+    let rpm_cap = cfg("llm.rpm").and_then(|s| s.parse::<u64>().ok()).unwrap_or(10);
+    let rpd_cap = cfg("llm.rpd").and_then(|s| s.parse::<u64>().ok()).unwrap_or(200);
+    format!(
+        "quota:\n  RPM {rpm_used}/{rpm_cap}\n  RPD {rpd_used}/{rpd_cap}"
+    )
 }
 
 fn list_registered_tools() -> String {

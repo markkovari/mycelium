@@ -117,6 +117,39 @@ fn delete_pending(task_id: &str) -> Result<(), String> {
     bucket.delete(task_id).map_err(|e| format!("{e:?}"))
 }
 
+fn read_counter(bucket: &wasi::keyvalue::store::Bucket, key: &str) -> u64 {
+    bucket
+        .get(key)
+        .ok()
+        .flatten()
+        .and_then(|b| std::str::from_utf8(&b).ok().map(|s| s.to_string()))
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(0)
+}
+
+fn quota_footer() -> String {
+    let now = wasi::clocks::wall_clock::now().seconds;
+    let minute = now / 60;
+    let day = now / 86_400;
+    let Ok(bucket) = wasi::keyvalue::store::open("mycelium-task-state") else { return String::new() };
+    let keys = bucket.list_keys(None).map(|r| r.keys).unwrap_or_default();
+    let mut rpm_used = 0u64;
+    let mut rpd_used = 0u64;
+    let min_suffix = format!("/min/{minute}");
+    let day_suffix = format!("/day/{day}");
+    for k in &keys {
+        if k.contains(&min_suffix) {
+            rpm_used += read_counter(&bucket, k);
+        }
+        if k.contains(&day_suffix) {
+            rpd_used += read_counter(&bucket, k);
+        }
+    }
+    let rpm_cap = cfg("llm.rpm").and_then(|s| s.parse::<u64>().ok()).unwrap_or(10);
+    let rpd_cap = cfg("llm.rpd").and_then(|s| s.parse::<u64>().ok()).unwrap_or(200);
+    format!("_RPM {rpm_used}/{rpm_cap} • RPD {rpd_used}/{rpd_cap}_")
+}
+
 fn telegram_send(token: &str, chat_id: &str, text: &str) -> Result<(), String> {
     use wasi::http::outgoing_handler;
     use wasi::http::types::{Fields, Method, OutgoingBody, OutgoingRequest, Scheme};
@@ -348,8 +381,13 @@ impl exports::wasmcloud::messaging::handler::Guest for Component {
                         }
                         if pending.channel == "telegram" {
                             if let Some(token) = cfg("telegram.bot_token") {
-                                let _ =
-                                    telegram_send(&token, &pending.chat_id, &text);
+                                let footer = quota_footer();
+                                let body = if footer.is_empty() {
+                                    text.clone()
+                                } else {
+                                    format!("{text}\n\n{footer}")
+                                };
+                                let _ = telegram_send(&token, &pending.chat_id, &body);
                             }
                         }
                         let _ = delete_pending(&res.task_id);

@@ -172,7 +172,12 @@ TELEGRAM_CFG="$(build_cfg telegram.bot_token "${TELEGRAM_BOT_TOKEN:-}")"
 # channel-router falls back to list_agents when default.agent_id is "auto" or
 # unset, but the messaging plugin only binds wasi:config when at least one key
 # is configured — so always send a sentinel.
-CHANNEL_CFG="$(build_cfg default.agent_id "${DEFAULT_AGENT_ID:-auto}" telegram.bot_token "${TELEGRAM_BOT_TOKEN:-}")"
+CHANNEL_CFG="$(build_cfg \
+    default.agent_id "${DEFAULT_AGENT_ID:-auto}" \
+    telegram.bot_token "${TELEGRAM_BOT_TOKEN:-}" \
+    llm.rpm "${LLM_RPM:-}" \
+    llm.rpd "${LLM_RPD:-}" \
+)"
 
 # Per-workload pool_size (env-overridable).
 POOL_SIZE_API="${API_POOL_SIZE:-4}"
@@ -189,7 +194,7 @@ WORKLOADS=(
     "mycelium-channel-router;channel-router;channel-router,agent-registry,conversation-store;wasi:keyvalue:store|wasi:config:store${CHANNEL_CFG:+:}${CHANNEL_CFG}|wasi:logging:logging|wasi:http:outgoing-handler|wasmcloud:messaging:consumer,handler,types:subscriptions=mycelium.channel.telegram.raw;${POOL_SIZE_DEFAULT}"
     "mycelium-telegram-out;telegram-out;telegram-out;wasi:config:store${TELEGRAM_CFG:+:}${TELEGRAM_CFG}|wasi:logging:logging|wasmcloud:messaging:consumer,handler,types:subscriptions=mycelium.channel.telegram.out.>;${POOL_SIZE_DEFAULT}"
     "mycelium-pairing;pairing;session-bridge;wasi:keyvalue:store|wasi:logging:logging|wasmcloud:messaging:consumer,handler,types:subscriptions=mycelium.pair.>;${POOL_SIZE_DEFAULT}"
-    "mycelium-executor;executor;executor,conversation-store;wasi:keyvalue:store|wasi:config:store${TELEGRAM_CFG:+:}${TELEGRAM_CFG}|wasi:logging:logging|wasi:http:outgoing-handler|wasmcloud:messaging:consumer,handler,types:subscriptions=mycelium.task.submit,mycelium.step.result,mycelium.step.tool-calls,mycelium.tool.result;${POOL_SIZE_DEFAULT}"
+    "mycelium-executor;executor;executor,conversation-store;wasi:keyvalue:store|wasi:config:store${CHANNEL_CFG:+:}${CHANNEL_CFG}|wasi:logging:logging|wasi:http:outgoing-handler|wasmcloud:messaging:consumer,handler,types:subscriptions=mycelium.task.submit,mycelium.step.result,mycelium.step.tool-calls,mycelium.tool.result;${POOL_SIZE_DEFAULT}"
     "mycelium-agent;agent;agent,conversation-store;wasi:keyvalue:store|wasi:config:store${AGENT_CFG:+:}${AGENT_CFG}|wasi:logging:logging|wasi:http:outgoing-handler|wasmcloud:messaging:consumer,handler,types:subscriptions=mycelium.task.step.agent;${POOL_SIZE_AGENT}"
     "mycelium-tools;tools;tool-runner;wasi:keyvalue:store|wasi:logging:logging|wasmcloud:messaging:consumer,handler,types:subscriptions=mycelium.tool.call;${POOL_SIZE_TOOLS}"
     "mycelium-memory;memory;memory-store;wasi:keyvalue:store|wasi:logging:logging|wasmcloud:messaging:consumer,handler,types:subscriptions=mycelium.memory.>;${POOL_SIZE_DEFAULT}"
