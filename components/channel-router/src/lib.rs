@@ -39,18 +39,34 @@ fn random_uuid_v4() -> String {
 }
 
 fn seen_update(update_id: u64) -> bool {
-    // wasi:keyvalue/atomics::increment crashed wash's NATS plugin
-    // (bytes::advance panic on empty value), so we fall back to a racy
-    // exists()+set(). Downstream agent/rate cap absorbs the rare double-fire.
+    // wash 2.1.0 fans every NATS message to multiple component instances in
+    // parallel, even with pool_size=1 and max_invocations=1. wasi:keyvalue
+    // atomics crash the NATS plugin, so we marker-CAS instead: write a random
+    // claim token to the seen key, then read it back. If it matches we won; if
+    // it differs, another parallel instance overwrote us and we bail.
     let Ok(bucket) = wasi::keyvalue::store::open("mycelium-channel-pending") else {
         return false;
     };
     let key = format!("seen/{update_id}");
     if matches!(bucket.exists(&key), Ok(true)) {
+        // Definitively seen earlier; might be our own marker or an older "1".
+        // Either way treat as duplicate.
+        let was_our_marker = match bucket.get(&key) {
+            Ok(Some(b)) => b.starts_with(b"claim-"),
+            _ => false,
+        };
+        // If it's an older "1" marker (pre-marker code), still a dup.
+        let _ = was_our_marker;
         return true;
     }
-    let _ = bucket.set(&key, b"1");
-    false
+    let marker = format!("claim-{}", random_uuid_v4());
+    if bucket.set(&key, marker.as_bytes()).is_err() {
+        return true;
+    }
+    match bucket.get(&key) {
+        Ok(Some(stored)) if stored == marker.as_bytes() => false,
+        _ => true,
+    }
 }
 
 fn pick_default_agent_for_chat(chat_id: &str) -> Option<String> {
@@ -376,7 +392,8 @@ fn handle_telegram_raw(body: &[u8]) {
     // Dedupe by update_id. wash 2.1.0 may deliver the same raw subject to
     // multiple concurrent handler instances; we only want to fire one task
     // per Telegram update.
-    if let Some(uid) = update.get("update_id").and_then(|v| v.as_u64()) {
+    let update_id = update.get("update_id").and_then(|v| v.as_u64());
+    if let Some(uid) = update_id {
         if seen_update(uid) {
             return;
         }
@@ -466,7 +483,13 @@ fn handle_telegram_raw(body: &[u8]) {
         );
     }
 
-    let task_id = random_uuid_v4();
+    // Deterministic task_id from update_id so parallel router instances
+    // produce identical task.submit messages — executor then dedups on task_id
+    // and only the first instance does I/O (sends the placeholder, etc.).
+    let task_id = match update_id {
+        Some(uid) => format!("tg-{uid}"),
+        None => random_uuid_v4(),
+    };
     let task = json!({
         "id": task_id,
         "conversation_id": conv_id,

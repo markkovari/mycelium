@@ -86,6 +86,30 @@ fn save_state(state: &TaskStateJson) -> Result<(), String> {
         .map_err(|e| format!("{e:?}"))
 }
 
+/// Marker-CAS claim on task.submit. wash 2.1.0 fans the message to multiple
+/// component instances; only one should send the Telegram placeholder and
+/// publish the first step.agent. Write a random claim token at claim/<id>,
+/// read it back, and proceed only if our token survived the race.
+fn claim_task(task_id: &str) -> bool {
+    let Ok(bucket) = wasi::keyvalue::store::open(BUCKET) else { return true };
+    let key = format!("claim/task/{task_id}");
+    if matches!(bucket.exists(&key), Ok(true)) {
+        return false;
+    }
+    let token_bytes = wasi::random::random::get_random_bytes(16);
+    let token = token_bytes
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>();
+    if bucket.set(&key, token.as_bytes()).is_err() {
+        return false;
+    }
+    match bucket.get(&key) {
+        Ok(Some(stored)) if stored == token.as_bytes() => true,
+        _ => false,
+    }
+}
+
 fn load_state(id: &str) -> Result<Option<TaskStateJson>, String> {
     let bucket = open()?;
     match bucket
@@ -341,6 +365,15 @@ impl exports::wasmcloud::messaging::handler::Guest for Component {
             "mycelium.task.submit" => {
                 let task: TaskJson =
                     serde_json::from_slice(&body).map_err(|e| format!("decode task: {e}"))?;
+
+                // wash 2.1.0 fans every NATS message to multiple component
+                // instances in parallel; without a hard dedup here, each
+                // parallel instance sends its own "🤔 thinking…" Telegram
+                // placeholder. claim_task is a marker-CAS on task-state KV
+                // keyed by task_id; first writer wins.
+                if !claim_task(&task.id) {
+                    return Ok(());
+                }
 
                 // Look up chat_id from the pending entry (channel-router wrote it
                 // when the inbound raw arrived). Send a "thinking" placeholder
