@@ -20,7 +20,7 @@ path  = "wit"
 world = "tool-time"
 
 [package.metadata.component.target.dependencies]
-"wasi:logging"        = { path = "wit/deps/wasi-logging-0.1.0-draft" }
-"wasi:clocks"         = { path = "wit/deps/wasi-clocks-0.2.2" }
-"wasi:io"             = { path = "wit/deps/wasi-io-0.2.2" }
-"wasmcloud:messaging" = { path = "wit/deps/wasmcloud-messaging-0.2.0" }
+"wasi:clocks"    = { path = "wit/deps/wasi-clocks-0.2.2" }
+"wasi:io"        = { path = "wit/deps/wasi-io-0.2.2" }
+"mycelium:types" = { path = "wit/deps/mycelium-types-0.1.0" }
+"mycelium:tool"  = { path = "wit/deps/mycelium-tool-0.1.0" }

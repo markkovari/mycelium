@@ -1,8 +1,9 @@
-// web_fetch tool: GET an HTTPS URL, return body truncated to 4 KB.
-// Subscribe: mycelium.tool.call.web_fetch
-// Reply:     mycelium.tool.result
-//
-// Input: arguments = {"url": "https://example.com"}
+//! web_fetch skill — GET an HTTP(S) URL, return body truncated to 4 KB.
+//!
+//! Declares `wasi:http/outgoing-handler` as its capability. The
+//! mycelium-tool-runner adds wasi:http to the wasmtime Linker only if
+//! the manifest declared it AND the operator allow-list approves it.
+
 wit_bindgen::generate!({
     path: "wit",
     world: "tool-web-fetch",
@@ -11,13 +12,8 @@ wit_bindgen::generate!({
 
 use serde_json::{json, Value};
 
-fn publish(subject: &str, body: Vec<u8>) {
-    let _ = wasmcloud::messaging::consumer::publish(&wasmcloud::messaging::types::BrokerMessage {
-        subject: subject.to_string(),
-        reply_to: None,
-        body,
-    });
-}
+use exports::mycelium::tool::tool_provider::Guest;
+use mycelium::types::types::{DomainError, ToolCallRequest, ToolCallResult};
 
 struct ParsedUrl {
     scheme: wasi::http::types::Scheme,
@@ -50,7 +46,7 @@ fn http_get(url_str: &str) -> Result<String, String> {
     let url = parse_url(url_str)?;
     let headers = Fields::new();
     headers
-        .set("user-agent", &[b"mycelium-tool-web-fetch/0.1".to_vec()])
+        .set("user-agent", &[b"mycelium-skill-web-fetch/0.1".to_vec()])
         .map_err(|e| format!("{e:?}"))?;
     let req = OutgoingRequest::new(headers);
     req.set_method(&Method::Get).map_err(|_| "method".to_string())?;
@@ -79,38 +75,29 @@ fn http_get(url_str: &str) -> Result<String, String> {
 
 struct Component;
 
-impl exports::wasmcloud::messaging::handler::Guest for Component {
-    fn handle_message(msg: wasmcloud::messaging::types::BrokerMessage) -> Result<(), String> {
-        if msg.subject != "mycelium.tool.call.web_fetch" {
-            return Ok(());
-        }
-        let req: Value = serde_json::from_slice(&msg.body).map_err(|e| e.to_string())?;
-        let task_id = req.get("task_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let call_id = req.get("call_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let args_raw = req.get("arguments").and_then(|v| v.as_str()).unwrap_or("{}");
-        let args: Value = serde_json::from_str(args_raw).unwrap_or_else(|_| json!({}));
+impl Guest for Component {
+    fn invoke(call: ToolCallRequest) -> Result<ToolCallResult, DomainError> {
+        let args: Value =
+            serde_json::from_str(&call.args_json).unwrap_or_else(|_| json!({}));
         let url = args.get("url").and_then(|v| v.as_str()).unwrap_or("");
-
-        let (output, error) = if url.is_empty() {
-            (None, Some("missing url argument".to_string()))
-        } else {
-            match http_get(url) {
-                Ok(text) => (Some(text), None),
-                Err(e) => (None, Some(e)),
-            }
+        if url.is_empty() {
+            return Ok(ToolCallResult {
+                call_id: call.call_id,
+                tool_id: call.tool_id,
+                output_json: json!({"error": "missing url argument"}).to_string(),
+                is_error: true,
+            });
+        }
+        let (output_json, is_error) = match http_get(url) {
+            Ok(text) => (json!({"body": text}).to_string(), false),
+            Err(e) => (json!({"error": e}).to_string(), true),
         };
-
-        let out = json!({
-            "task_id": task_id,
-            "call_id": call_id,
-            "output": output,
-            "error": error,
-        });
-        publish(
-            "mycelium.tool.result",
-            serde_json::to_vec(&out).map_err(|e| e.to_string())?,
-        );
-        Ok(())
+        Ok(ToolCallResult {
+            call_id: call.call_id,
+            tool_id: call.tool_id,
+            output_json,
+            is_error,
+        })
     }
 }
 

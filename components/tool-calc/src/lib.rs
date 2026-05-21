@@ -1,9 +1,13 @@
-// calc tool: evaluates a small arithmetic expression.
-// Subscribe: mycelium.tool.call.calc
-// Reply:     mycelium.tool.result
-//
-// Input: arguments = {"expr": "(17*23)+sqrt(81)"}
-// Supports: + - * / ( ) numbers, unary minus, sqrt(x).
+//! calc skill — evaluates a small arithmetic expression.
+//!
+//! Compiled against the slim `mycelium:skill` world. No NATS imports; pure
+//! `tool-provider.invoke(req) -> result<resp, domain-error>`. The
+//! mycelium-tool-runner is what receives the NATS request, instantiates
+//! this component in a fresh wasmtime store, and publishes the result.
+//!
+//! Input: `args_json = {"expr": "(17*23)+sqrt(81)"}`
+//! Supports: + - * / ( ) numbers, unary minus, sqrt(x), abs(x).
+
 wit_bindgen::generate!({
     path: "wit",
     world: "tool-calc",
@@ -12,13 +16,8 @@ wit_bindgen::generate!({
 
 use serde_json::{json, Value};
 
-fn publish(subject: &str, body: Vec<u8>) {
-    let _ = wasmcloud::messaging::consumer::publish(&wasmcloud::messaging::types::BrokerMessage {
-        subject: subject.to_string(),
-        reply_to: None,
-        body,
-    });
-}
+use exports::mycelium::tool::tool_provider::Guest;
+use mycelium::types::types::{DomainError, ToolCallRequest, ToolCallResult};
 
 // ── tiny recursive-descent evaluator ─────────────────────────────────────
 struct Parser<'a> {
@@ -82,7 +81,6 @@ impl<'a> Parser<'a> {
             return Ok(v);
         }
         if c.is_ascii_alphabetic() {
-            // identifier — only sqrt is supported.
             let start = self.i;
             while self.i < self.s.len() && self.s[self.i].is_ascii_alphabetic() {
                 self.i += 1;
@@ -101,7 +99,6 @@ impl<'a> Parser<'a> {
                 _ => Err(format!("unknown fn {name}")),
             };
         }
-        // number
         let start = self.i;
         while self.i < self.s.len() && (self.s[self.i].is_ascii_digit() || self.s[self.i] == b'.') {
             self.i += 1;
@@ -126,34 +123,21 @@ fn eval(expr: &str) -> Result<f64, String> {
 
 struct Component;
 
-impl exports::wasmcloud::messaging::handler::Guest for Component {
-    fn handle_message(msg: wasmcloud::messaging::types::BrokerMessage) -> Result<(), String> {
-        if msg.subject != "mycelium.tool.call.calc" {
-            return Ok(());
-        }
-        let req: Value = serde_json::from_slice(&msg.body).map_err(|e| e.to_string())?;
-        let task_id = req.get("task_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let call_id = req.get("call_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let args_raw = req.get("arguments").and_then(|v| v.as_str()).unwrap_or("{}");
-        let args: Value = serde_json::from_str(args_raw).unwrap_or_else(|_| json!({}));
+impl Guest for Component {
+    fn invoke(call: ToolCallRequest) -> Result<ToolCallResult, DomainError> {
+        let args: Value =
+            serde_json::from_str(&call.args_json).unwrap_or_else(|_| json!({}));
         let expr = args.get("expr").and_then(|v| v.as_str()).unwrap_or("");
-
-        let (output, error) = match eval(expr) {
-            Ok(n) => (Some(format!("{n}")), None),
-            Err(e) => (None, Some(e)),
+        let (output_json, is_error) = match eval(expr) {
+            Ok(n) => (json!({"value": n}).to_string(), false),
+            Err(e) => (json!({"error": e}).to_string(), true),
         };
-
-        let out = json!({
-            "task_id": task_id,
-            "call_id": call_id,
-            "output": output,
-            "error": error,
-        });
-        publish(
-            "mycelium.tool.result",
-            serde_json::to_vec(&out).map_err(|e| e.to_string())?,
-        );
-        Ok(())
+        Ok(ToolCallResult {
+            call_id: call.call_id,
+            tool_id: call.tool_id,
+            output_json,
+            is_error,
+        })
     }
 }
 
