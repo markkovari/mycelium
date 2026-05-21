@@ -1,7 +1,8 @@
 use anyhow::Result;
 use mycelium_core::{
     agent, agent_registry::AgentRegistry, channel_router, config::Config,
-    conversation_store::ConversationStore, events, executor, state::AppState, telegram_poller,
+    conversation_store::ConversationStore, events, executor, gateway, state::AppState,
+    telegram_out, telegram_poller,
 };
 use tokio::sync::broadcast;
 use tokio::task::JoinSet;
@@ -68,6 +69,19 @@ async fn main() -> Result<()> {
     spawn_module!(
         "agent",
         agent::run(
+            state.clone(),
+            registry.clone(),
+            convs.clone(),
+            shutdown_tx.subscribe()
+        )
+    );
+    spawn_module!(
+        "telegram_out",
+        telegram_out::run(state.clone(), shutdown_tx.subscribe())
+    );
+    spawn_module!(
+        "gateway",
+        gateway::run(
             state.clone(),
             registry.clone(),
             convs.clone(),
