@@ -1,6 +1,10 @@
 use anyhow::Result;
-use mycelium_core::{config::Config, state::AppState};
+use mycelium_core::{
+    agent, agent_registry::AgentRegistry, channel_router, config::Config,
+    conversation_store::ConversationStore, events, executor, state::AppState, telegram_poller,
+};
 use tokio::sync::broadcast;
+use tokio::task::JoinSet;
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -13,36 +17,87 @@ async fn main() -> Result<()> {
         default_agent = %config.default_agent_id,
         llm_rpm = config.llm_rpm,
         llm_rpd = config.llm_rpd,
+        disabled = ?config.disabled_modules,
         "mycelium-core starting",
     );
 
-    let state = AppState::connect(config).await?;
+    let state = AppState::connect(config.clone()).await?;
+    let registry = AgentRegistry::open(&state.js).await?;
+    let convs = ConversationStore::open(&state.js).await?;
 
-    // Shutdown broadcast: every module subscribes a receiver and exits its
-    // `run` future when this fires. Capacity 16 is generous; only main sends.
     let (shutdown_tx, _) = broadcast::channel::<()>(16);
+    let mut tasks = JoinSet::new();
 
-    // Modules will be wired in subsequent phases. For Phase 1 we just block
-    // on the shutdown signal so the binary stays alive and exits cleanly.
-    tracing::info!("no modules enabled yet (Phase 1 skeleton); waiting for SIGINT");
+    macro_rules! spawn_module {
+        ($name:literal, $task:expr) => {{
+            if state.config.module_enabled($name) {
+                let fut = $task;
+                tasks.spawn(async move {
+                    let r: Result<()> = fut.await;
+                    if let Err(e) = r {
+                        tracing::error!(module = $name, error = %e, "module exited with error");
+                    } else {
+                        tracing::info!(module = $name, "module exited cleanly");
+                    }
+                });
+                tracing::info!(module = $name, "spawned");
+            } else {
+                tracing::info!(module = $name, "disabled via config");
+            }
+        }};
+    }
 
-    let mut shutdown_rx = shutdown_tx.subscribe();
+    spawn_module!("events", events::run(state.clone(), shutdown_tx.subscribe()));
+    spawn_module!(
+        "telegram_poller",
+        telegram_poller::run(state.clone(), shutdown_tx.subscribe())
+    );
+    spawn_module!(
+        "channel_router",
+        channel_router::run(
+            state.clone(),
+            registry.clone(),
+            convs.clone(),
+            shutdown_tx.subscribe()
+        )
+    );
+    spawn_module!(
+        "executor",
+        executor::run(state.clone(), convs.clone(), shutdown_tx.subscribe())
+    );
+    spawn_module!(
+        "agent",
+        agent::run(
+            state.clone(),
+            registry.clone(),
+            convs.clone(),
+            shutdown_tx.subscribe()
+        )
+    );
+
+    tracing::info!("mycelium-core ready");
+
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {
-            tracing::info!("ctrl-c received, shutting down");
+            tracing::info!("ctrl-c received, draining tasks");
         }
-        _ = shutdown_rx.recv() => {
-            tracing::info!("internal shutdown received");
+        // If any task panics or otherwise stops on its own, treat as fatal.
+        // (Graceful exit is signalled via `tracing::info!("... exited cleanly")`
+        // above; we don't break the loop unless ctrl_c fires.)
+        _ = wait_for_any_panic(&mut tasks) => {
+            tracing::warn!("a module task ended unexpectedly; shutting the rest down");
         }
     }
 
     let _ = shutdown_tx.send(());
-    // Give modules a moment to drain — placeholder for future task joins.
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    let drain = tokio::time::timeout(std::time::Duration::from_secs(5), drain_tasks(tasks)).await;
+    if drain.is_err() {
+        tracing::warn!("some modules did not drain within 5s; aborting");
+    }
 
-    // Suppress unused-warning until modules land.
     drop(state);
-
+    drop(registry);
+    drop(convs);
     Ok(())
 }
 
@@ -54,4 +109,16 @@ fn init_tracing() {
         .with_target(false)
         .compact()
         .init();
+}
+
+async fn wait_for_any_panic(tasks: &mut JoinSet<()>) {
+    if let Some(res) = tasks.join_next().await {
+        if let Err(e) = res {
+            tracing::error!(error = %e, "module task panicked");
+        }
+    }
+}
+
+async fn drain_tasks(mut tasks: JoinSet<()>) {
+    while let Some(_res) = tasks.join_next().await {}
 }

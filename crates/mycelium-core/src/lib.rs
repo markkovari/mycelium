@@ -10,8 +10,14 @@
 //!
 //! Skill execution lives in a separate process — see `mycelium-tool-runner`.
 
+pub mod agent;
 pub mod agent_registry;
+pub mod channel_router;
 pub mod config;
 pub mod conversation_store;
+pub mod events;
+pub mod executor;
 pub mod memory_store;
 pub mod state;
+pub mod telegram;
+pub mod telegram_poller;
