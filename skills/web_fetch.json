@@ -1,0 +1,25 @@
+{
+  "name": "web_fetch",
+  "version": "0.1.0",
+  "source": {
+    "type": "oci",
+    "image": "ghcr.io/markkovari/mycelium/tool-web-fetch:dev"
+  },
+  "capabilities": [
+    "wasi:http/outgoing-handler"
+  ],
+  "fuel_limit": 500000000,
+  "memory_max_bytes": 16777216,
+  "wall_deadline_ms": 30000,
+  "description": "GET an HTTP/HTTPS URL and return up to 4 KB of the response body.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "url": {
+        "type": "string",
+        "description": "Absolute URL to fetch."
+      }
+    },
+    "required": ["url"]
+  }
+}

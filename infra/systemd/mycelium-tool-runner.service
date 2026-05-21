@@ -1,0 +1,38 @@
+[Unit]
+Description=mycelium tool runner (wasmtime sandbox for skills)
+Documentation=https://github.com/markkovari/mycelium
+Requires=mycelium-nats.service
+After=mycelium-nats.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mycelium
+Group=mycelium
+EnvironmentFile=-/etc/mycelium/secrets.env
+EnvironmentFile=-/etc/mycelium/mycelium-tool-runner.env
+WorkingDirectory=/var/lib/mycelium
+ExecStart=/usr/local/bin/mycelium-tool-runner
+Restart=always
+RestartSec=3s
+
+# Tool-runner instantiates untrusted skill components in wasmtime; the
+# runtime itself is already capability-sandboxed per skill manifest.
+# Process-level hardening on top guards the runner binary from anything
+# escaping its own bugs.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/mycelium /var/lib/mycelium/skill-cache
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictRealtime=true
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

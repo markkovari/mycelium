@@ -1,0 +1,88 @@
+name: Build native binaries (aarch64 / x86_64)
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+    paths:
+      - 'crates/mycelium-core/**'
+      - 'crates/mycelium-tool-runner/**'
+      - 'crates/mycelium-types/**'
+      - 'crates/mycelium-agent-core/**'
+      - 'crates/mycelium-tool-core/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/native.yaml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - aarch64-unknown-linux-gnu
+          - x86_64-unknown-linux-gnu
+        binary:
+          - mycelium-core
+          - mycelium-tool-runner
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compilation toolchain
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          mkdir -p ~/.cargo
+          cat >> ~/.cargo/config.toml <<'EOF'
+          [target.aarch64-unknown-linux-gnu]
+          linker = "aarch64-linux-gnu-gcc"
+          EOF
+
+      - name: Build ${{ matrix.binary }}
+        run: cargo build --release --target ${{ matrix.target }} -p ${{ matrix.binary }}
+
+      - name: Resolve version tag
+        id: ver
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=dev-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Package
+        run: |
+          ARTIFACT="${{ matrix.binary }}-${{ steps.ver.outputs.tag }}-${{ matrix.target }}.tar.gz"
+          BIN_PATH="target/${{ matrix.target }}/release/${{ matrix.binary }}"
+          tar -C "$(dirname "$BIN_PATH")" -czf "$ARTIFACT" "$(basename "$BIN_PATH")"
+          sha256sum "$ARTIFACT" > "$ARTIFACT.sha256"
+          echo "artifact=$ARTIFACT" >> "$GITHUB_OUTPUT"
+        id: pack
+
+      - name: Upload as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.pack.outputs.artifact }}
+          path: |
+            ${{ steps.pack.outputs.artifact }}
+            ${{ steps.pack.outputs.artifact }}.sha256
+          retention-days: 14
+
+      - name: Attach to release (tag pushes only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ steps.pack.outputs.artifact }}
+            ${{ steps.pack.outputs.artifact }}.sha256

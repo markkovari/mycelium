@@ -54,6 +54,8 @@ create_kv mycelium-events-journal  1
 create_kv mycelium-telegram-poller-state
 create_kv mycelium-channel-pending
 create_kv mycelium-tools
+create_kv mycelium-skills          # tool-runner: skill manifests
+create_kv mycelium-skill-policy    # tool-runner: per-operator allow-list overrides
 
 echo ""
 echo "Seeding default tool schemas (mycelium-tools KV)..."
@@ -68,4 +70,13 @@ nats kv put --server="$NATS_URL" mycelium-tools web_fetch \
   >/dev/null 2>&1 || true
 
 echo ""
-echo "Done. Run \`wash app deploy wadm/local.yaml\` to start components."
+echo "==> Seeding default skill manifests (mycelium-skills KV)"
+for skill in time calc web_fetch; do
+  if [ -f "skills/${skill}.json" ]; then
+    nats kv put --server="$NATS_URL" mycelium-skills "$skill" < "skills/${skill}.json" \
+      >/dev/null 2>&1 && echo "  seeded skill $skill"
+  fi
+done
+
+echo ""
+echo "Done. Start mycelium-core + mycelium-tool-runner via systemd."

@@ -1,0 +1,23 @@
+{
+  "name": "calc",
+  "version": "0.1.0",
+  "source": {
+    "type": "oci",
+    "image": "ghcr.io/markkovari/mycelium/tool-calc:dev"
+  },
+  "capabilities": [],
+  "fuel_limit": 100000000,
+  "memory_max_bytes": 8388608,
+  "wall_deadline_ms": 5000,
+  "description": "Evaluate a simple arithmetic expression with + - * / ( ) sqrt() abs().",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "expr": {
+        "type": "string",
+        "description": "The expression to evaluate, e.g. (17*23)+sqrt(81)"
+      }
+    },
+    "required": ["expr"]
+  }
+}
