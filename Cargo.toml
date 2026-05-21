@@ -1,31 +1,31 @@
 [workspace]
 resolver = "2"
 members = [
-    "components/gateway",
-    "components/executor",
-    "components/agent",
-    "components/tool-runner",
-    "components/memory-store",
-    "components/conversation-store",
-    "components/router",
-    "components/event-logger",
-    "components/telegram-poller",
-    "components/channel-router",
-    "components/telegram-out",
-    "components/session-bridge",
-    "components/agent-registry",
-    "components/task-publisher",
+    # Sandboxed skill components (wasm32-wasip2; loaded into mycelium-tool-runner).
     "components/tool-time",
     "components/tool-calc",
     "components/tool-web-fetch",
+    # Native pipeline + tool runner + shared crates.
+    "crates/mycelium-core",
+    "crates/mycelium-tool-runner",
     "crates/mycelium-types",
     "crates/mycelium-agent-core",
     "crates/mycelium-tool-core",
     "crates/mycelium-cli",
     "crates/mycelium-tests",
-    "crates/mycelium-telegram",
+]
+
+# `cargo build` (no -p) targets only the native crates. Skill components live
+# in the workspace for shared dep resolution but must be built with
+# cargo-component (`just build`) because they target wasm32-wasip2.
+default-members = [
     "crates/mycelium-core",
     "crates/mycelium-tool-runner",
+    "crates/mycelium-types",
+    "crates/mycelium-agent-core",
+    "crates/mycelium-tool-core",
+    "crates/mycelium-cli",
+    "crates/mycelium-tests",
 ]
 
 [workspace.package]

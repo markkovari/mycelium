@@ -1,283 +1,141 @@
 #!/usr/bin/env bash
-# Mycelium installer for Linux (aarch64 / x86_64).
+# Mycelium one-shot installer for Linux (aarch64 / x86_64).
 #
-# Usage:
-#   curl -fsSL https://raw.githubusercontent.com/markkovari/mycelium/main/infra/install.sh | bash
+# Sets up NATS + JetStream, downloads the mycelium-core + mycelium-tool-runner
+# binaries, installs the systemd units, and starts everything.
 #
-# Or with env overrides:
-#   MYCELIUM_VERSION=latest \
-#   MYCELIUM_PREFIX=/usr/local \
-#   MYCELIUM_DATA_DIR=/var/lib/mycelium \
-#   GHCR_OWNER=markkovari \
-#   curl -fsSL https://… | bash
+# Usage (Pi):
+#   curl -fsSL https://raw.githubusercontent.com/markkovari/mycelium/main/infra/install.sh | sudo bash
+#
+# Or from a checkout:
+#   sudo bash infra/install.sh
+#
+# Idempotent. Rerun to upgrade.
 
 set -euo pipefail
 
-# ── Defaults ─────────────────────────────────────────────────────────────────
-MYCELIUM_VERSION="${MYCELIUM_VERSION:-dev}"
-MYCELIUM_REF="${MYCELIUM_REF:-main}"     # git ref for fetching unit files + helper scripts
-MYCELIUM_PREFIX="${MYCELIUM_PREFIX:-/usr/local}"
-MYCELIUM_DATA_DIR="${MYCELIUM_DATA_DIR:-/var/lib/mycelium}"
-MYCELIUM_CONF_DIR="${MYCELIUM_CONF_DIR:-/etc/mycelium}"
+# ── Defaults ────────────────────────────────────────────────────────────
 GHCR_OWNER="${GHCR_OWNER:-markkovari}"
-GHCR_REGISTRY="${GHCR_REGISTRY:-ghcr.io}"
-SKIP_SYSTEMD="${SKIP_SYSTEMD:-0}"
-SKIP_PULL="${SKIP_PULL:-0}"
-SKIP_DEPLOY="${SKIP_DEPLOY:-0}"
-
-WASH_VERSION="${WASH_VERSION:-2.1.0}"
+MYCELIUM_REPO="${MYCELIUM_REPO:-${GHCR_OWNER}/mycelium}"
+MYCELIUM_REF="${MYCELIUM_REF:-main}"
+PREFIX="${PREFIX:-/usr/local}"
+STATE_DIR="${STATE_DIR:-/var/lib/mycelium}"
+CONF_DIR="${CONF_DIR:-/etc/mycelium}"
 NATS_VERSION="${NATS_VERSION:-2.10.20}"
 NATS_CLI_VERSION="${NATS_CLI_VERSION:-0.1.5}"
+SKIP_NATS_INSTALL="${SKIP_NATS_INSTALL:-0}"
 
-COMPONENTS=(
-    gateway executor agent tool-runner memory-store conversation-store
-    router event-logger telegram-poller telegram-out channel-router
-    session-bridge agent-registry task-publisher
-    tool-time tool-calc tool-web-fetch
-)
-
-# ── Helpers ──────────────────────────────────────────────────────────────────
-log() { printf '\033[1;36m[install]\033[0m %s\n' "$*"; }
+log()  { printf '\033[1;36m[install]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[install]\033[0m %s\n' "$*" >&2; }
-die() { printf '\033[1;31m[install]\033[0m %s\n' "$*" >&2; exit 1; }
+die()  { printf '\033[1;31m[install]\033[0m %s\n' "$*" >&2; exit 1; }
 
-need() { command -v "$1" >/dev/null 2>&1 || die "missing required tool: $1"; }
+[ "$EUID" -eq 0 ] || die "run as root (sudo)"
 
-# ── Pre-flight ───────────────────────────────────────────────────────────────
+# ── Pre-flight ──────────────────────────────────────────────────────────
 log "Mycelium installer starting"
-
-OS="$(uname -s)"
-ARCH="$(uname -m)"
-case "$OS" in
-    Linux) ;;
-    *) die "this installer supports Linux only; got $OS" ;;
-esac
-case "$ARCH" in
-    aarch64|arm64) ARCH_GO=arm64 ARCH_TAR=arm64 ;;
-    x86_64|amd64)  ARCH_GO=amd64 ARCH_TAR=amd64 ;;
-    *) die "unsupported architecture: $ARCH" ;;
+case "$(uname -s)" in Linux) ;; *) die "Linux only" ;; esac
+case "$(uname -m)" in
+  aarch64|arm64) ARCH_TAR=arm64 ;;
+  x86_64|amd64)  ARCH_TAR=amd64 ;;
+  *) die "unsupported arch: $(uname -m)" ;;
 esac
 
-if [ "$(id -u)" -ne 0 ]; then
-    SUDO="sudo"
-else
-    SUDO=""
-fi
+REPO_RAW="https://raw.githubusercontent.com/${MYCELIUM_REPO}/${MYCELIUM_REF}"
 
-need curl
-need tar
-need awk
-
-# ── Layout ───────────────────────────────────────────────────────────────────
-$SUDO mkdir -p \
-    "$MYCELIUM_PREFIX/bin" \
-    "$MYCELIUM_DATA_DIR/nats" \
-    "$MYCELIUM_DATA_DIR/oci-cache" \
-    "$MYCELIUM_DATA_DIR/wash/config" \
-    "$MYCELIUM_DATA_DIR/wash/data" \
-    "$MYCELIUM_DATA_DIR/wash/cache" \
-    "$MYCELIUM_CONF_DIR" \
-    /var/log/mycelium
-
-# ── nats-server ──────────────────────────────────────────────────────────────
-if ! command -v nats-server >/dev/null 2>&1; then
+# ── NATS server + CLI ───────────────────────────────────────────────────
+if [ "$SKIP_NATS_INSTALL" != "1" ]; then
+  if ! command -v nats-server >/dev/null 2>&1; then
     log "Installing nats-server $NATS_VERSION"
     tmp=$(mktemp -d)
-    url="https://github.com/nats-io/nats-server/releases/download/v${NATS_VERSION}/nats-server-v${NATS_VERSION}-linux-${ARCH_GO}.tar.gz"
-    curl -fsSL "$url" -o "$tmp/nats.tar.gz"
-    tar -xzf "$tmp/nats.tar.gz" -C "$tmp"
-    $SUDO install -m 0755 "$tmp"/nats-server-*/nats-server "$MYCELIUM_PREFIX/bin/nats-server"
+    url="https://github.com/nats-io/nats-server/releases/download/v${NATS_VERSION}/nats-server-v${NATS_VERSION}-linux-${ARCH_TAR}.tar.gz"
+    curl -fsSL "$url" | tar -xz -C "$tmp"
+    install -m 0755 "$tmp"/nats-server-*/nats-server "$PREFIX/bin/nats-server"
     rm -rf "$tmp"
-else
-    log "nats-server already installed: $(command -v nats-server)"
-fi
-
-# ── nats CLI ─────────────────────────────────────────────────────────────────
-if ! command -v nats >/dev/null 2>&1; then
+  else
+    log "nats-server: $(command -v nats-server)"
+  fi
+  if ! command -v nats >/dev/null 2>&1; then
     log "Installing nats CLI $NATS_CLI_VERSION"
     tmp=$(mktemp -d)
     url="https://github.com/nats-io/natscli/releases/download/v${NATS_CLI_VERSION}/nats-${NATS_CLI_VERSION}-linux-${ARCH_TAR}.zip"
-    if curl -fsSL "$url" -o "$tmp/nats.zip"; then
-        if command -v unzip >/dev/null 2>&1; then
-            unzip -q "$tmp/nats.zip" -d "$tmp"
-            $SUDO install -m 0755 "$tmp"/nats-*/nats "$MYCELIUM_PREFIX/bin/nats"
-        else
-            warn "  unzip not installed; skipping nats CLI install (apt install unzip and rerun)"
-        fi
+    if curl -fsSL "$url" -o "$tmp/nats.zip" && command -v unzip >/dev/null 2>&1; then
+      unzip -q "$tmp/nats.zip" -d "$tmp"
+      install -m 0755 "$tmp"/nats-*/nats "$PREFIX/bin/nats"
     else
-        warn "  failed to download nats CLI; install manually from https://github.com/nats-io/natscli/releases"
+      warn "  nats CLI install skipped (install unzip and rerun)"
     fi
     rm -rf "$tmp"
-else
-    log "nats CLI already installed: $(command -v nats)"
+  fi
 fi
 
-# ── wash CLI ─────────────────────────────────────────────────────────────────
-if ! command -v wash >/dev/null 2>&1; then
-    log "Installing wash $WASH_VERSION via the official installer"
-    if ! curl -fsSL https://wasmcloud.com/sh | bash; then
-        die "wash install failed; try installing manually from https://github.com/wasmCloud/wash/releases"
-    fi
+# ── Dirs + conf ─────────────────────────────────────────────────────────
+mkdir -p "$STATE_DIR" "$STATE_DIR/skill-cache" "$CONF_DIR"
+if ! id mycelium >/dev/null 2>&1; then
+  useradd --system --no-create-home --shell /usr/sbin/nologin mycelium
 fi
-# Always ensure $MYCELIUM_PREFIX/bin/wash exists as a regular file so systemd
-# (with ProtectHome=true) can exec it; the upstream installer drops it in
-# $HOME/.wash/bin which the unit's namespace cannot see.
-wash_src=""
-for cand in "$MYCELIUM_PREFIX/bin/wash" "$HOME/.wash/bin/wash" "$HOME/.wasmcloud/bin/wash" "$(command -v wash 2>/dev/null || true)"; do
-    [ -n "$cand" ] && [ -x "$cand" ] && [ ! -L "$cand" ] && { wash_src="$cand"; break; }
-done
-# Fallback: accept a symlink only if the target is itself a regular file outside $HOME.
-if [ -z "$wash_src" ]; then
-    for cand in "$HOME/.wash/bin/wash" "$HOME/.wasmcloud/bin/wash"; do
-        [ -x "$cand" ] && { wash_src="$cand"; break; }
-    done
-fi
-[ -z "$wash_src" ] && die "wash binary not found after install"
-if [ "$wash_src" != "$MYCELIUM_PREFIX/bin/wash" ]; then
-    log "Copying wash from $wash_src → $MYCELIUM_PREFIX/bin/wash"
-    $SUDO install -m 0755 "$wash_src" "$MYCELIUM_PREFIX/bin/wash"
-fi
-export PATH="$MYCELIUM_PREFIX/bin:$PATH"
-log "wash: $(command -v wash) ($(wash --version 2>/dev/null | head -1))"
+chown -R mycelium:mycelium "$STATE_DIR"
 
-# ── Verify registry reachability ─────────────────────────────────────────────
-# wash host pulls components on demand into --oci-cache-dir. We only verify
-# that the registry is reachable + each manifest exists at the requested tag.
-if [ "$SKIP_PULL" != "1" ]; then
-    log "Probing ${GHCR_REGISTRY}/${GHCR_OWNER}/mycelium/*:${MYCELIUM_VERSION}"
-    ok=0; bad=""
-    for c in "${COMPONENTS[@]}"; do
-        scope="repository:${GHCR_OWNER}/mycelium/${c}:pull"
-        tok=$(curl -fsSL "https://${GHCR_REGISTRY}/token?scope=${scope}" 2>/dev/null \
-              | awk -F'"' '/token/ {for(i=1;i<=NF;i++) if($i=="token"){print $(i+2); exit}}')
-        code=$(curl -sI -o /dev/null -w '%{http_code}' \
-               -H "Authorization: Bearer ${tok}" \
-               -H 'Accept: application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json' \
-               "https://${GHCR_REGISTRY}/v2/${GHCR_OWNER}/mycelium/${c}/manifests/${MYCELIUM_VERSION}")
-        if [ "$code" = "200" ]; then ok=$((ok+1)); else bad="$bad ${c}(${code})"; fi
-    done
-    log "  ${ok}/${#COMPONENTS[@]} manifests reachable"
-    if [ -n "$bad" ]; then
-        warn "  unreachable:$bad"
-        warn "  host will retry on first deploy; check package visibility on ghcr.io if persistent"
-    fi
-else
-    log "Skipping registry probe (SKIP_PULL=1)"
-fi
-
-# ── Auto-tune pool sizes ─────────────────────────────────────────────────────
-log "Detecting resources for pool sizes"
-total_mb=$(awk '/^MemTotal/ {print int($2/1024); exit}' /proc/meminfo)
-cores=$(nproc)
-reserved=800
-budget=$(( total_mb - reserved ))
-[ "$budget" -lt 0 ] && budget=0
-per_inst=5
-total_slots=$(( budget / per_inst ))
-cap=$(( cores * 2 ))
-[ "$cap" -lt 1 ] && cap=1
-agent_pool=$(( total_slots * 50 / 100 )); [ "$agent_pool" -gt "$cap" ] && agent_pool=$cap; [ "$agent_pool" -lt 1 ] && agent_pool=1
-api_pool=$(( total_slots * 25 / 100 ));   [ "$api_pool" -gt "$cap" ] && api_pool=$cap; [ "$api_pool" -lt 1 ] && api_pool=1
-tools_pool=$(( total_slots * 15 / 100 )); [ "$tools_pool" -gt "$cap" ] && tools_pool=$cap; [ "$tools_pool" -lt 1 ] && tools_pool=1
-log "  RAM ${total_mb}MB, cores ${cores} → agent=${agent_pool} api=${api_pool} tools=${tools_pool}"
-
-# ── Write env file ───────────────────────────────────────────────────────────
-log "Writing $MYCELIUM_CONF_DIR/host.env"
-$SUDO tee "$MYCELIUM_CONF_DIR/host.env" >/dev/null <<EOF
-# Mycelium wash host environment (autogenerated by install.sh).
-# Only shell-safe variable names are valid here (systemd EnvironmentFile).
-AGENT_POOL_SIZE=$agent_pool
-API_POOL_SIZE=$agent_pool
-TOOLS_POOL_SIZE=$tools_pool
-EOF
-$SUDO chmod 600 "$MYCELIUM_CONF_DIR/host.env"
-
-# Tokens / endpoints live in a separate secrets file consumed by deploy-v2.sh,
-# NOT by systemd. Use `mycelium init` (or `mycelium provider`/`mycelium token`)
-# to populate this — never hand-edit unless you know the schema.
-if [ ! -f "$MYCELIUM_CONF_DIR/secrets.env" ]; then
-    $SUDO tee "$MYCELIUM_CONF_DIR/secrets.env" >/dev/null <<'EOF'
-# LLM_ENDPOINT=
-# LLM_MODEL=
+if [ ! -f "$CONF_DIR/secrets.env" ]; then
+  cat > "$CONF_DIR/secrets.env" <<'EOF'
+# Populate via `mycelium init` or by editing. Mode 0600.
+# LLM_ENDPOINT=https://generativelanguage.googleapis.com/v1beta/openai/chat/completions
+# LLM_MODEL=gemini-2.5-flash-lite
 # LLM_API_KEY=
 # TELEGRAM_BOT_TOKEN=
+# LLM_RPM=10
+# LLM_RPD=200
 EOF
-    $SUDO chmod 600 "$MYCELIUM_CONF_DIR/secrets.env"
+  chmod 0600 "$CONF_DIR/secrets.env"
 fi
 
-# Helper to fetch repo files at the pinned ref. Uses codeload.github.com which
-# is cache-busted by the ref segment, unlike raw.githubusercontent.com.
-REPO_RAW="https://raw.githubusercontent.com/${GHCR_OWNER}/mycelium/${MYCELIUM_REF}"
-
-# ── systemd units ────────────────────────────────────────────────────────────
-if [ "$SKIP_SYSTEMD" != "1" ] && command -v systemctl >/dev/null 2>&1; then
-    log "Installing systemd units (ref=${MYCELIUM_REF})"
-    for unit in mycelium-nats.service mycelium-host.service; do
-        curl -fsSL "${REPO_RAW}/infra/systemd/${unit}" | $SUDO tee "/etc/systemd/system/${unit}" >/dev/null
-    done
-    $SUDO systemctl daemon-reload
-    $SUDO systemctl enable --now mycelium-nats.service
-    $SUDO systemctl enable --now mycelium-host.service
-    sleep 3
-    log "Services:"
-    $SUDO systemctl --no-pager --lines 0 status mycelium-nats.service mycelium-host.service || true
-else
-    log "Skipping systemd setup"
+# ── NATS systemd unit ───────────────────────────────────────────────────
+if command -v systemctl >/dev/null 2>&1; then
+  log "Installing mycelium-nats.service"
+  curl -fsSL "${REPO_RAW}/infra/systemd/mycelium-nats.service" \
+    -o /etc/systemd/system/mycelium-nats.service \
+    || warn "could not fetch mycelium-nats.service unit; assuming locally present"
+  systemctl daemon-reload
+  systemctl enable --now mycelium-nats.service
 fi
 
-# ── Bootstrap NATS streams + KV ──────────────────────────────────────────────
+# ── Bootstrap streams + KV ──────────────────────────────────────────────
 if command -v nats >/dev/null 2>&1; then
-    log "Initialising NATS streams and KV buckets"
-    tmp_init=$(mktemp)
-    curl -fsSL "${REPO_RAW}/infra/init-streams.sh" -o "$tmp_init"
-    NATS_URL="nats://127.0.0.1:4222" bash "$tmp_init" || warn "init-streams.sh failed; run manually after fixing"
-    rm -f "$tmp_init"
-else
-    warn "nats CLI not installed; skip stream init."
+  log "Initialising JetStream streams + KV buckets"
+  tmp=$(mktemp)
+  curl -fsSL "${REPO_RAW}/infra/init-streams.sh" -o "$tmp"
+  NATS_URL="nats://127.0.0.1:4222" bash "$tmp" \
+    || warn "init-streams.sh failed; rerun manually"
+  rm -f "$tmp"
 fi
 
-# ── Install deploy-v2.sh persistently for the CLI to reuse ───────────────────
-log "Installing deploy-v2.sh to /usr/local/share/mycelium/"
-$SUDO mkdir -p /usr/local/share/mycelium
+# ── Native binaries + units (delegate to deploy-native.sh) ──────────────
+log "Installing mycelium-core + mycelium-tool-runner via deploy-native.sh"
 tmp_dep=$(mktemp)
-curl -fsSL "${REPO_RAW}/infra/deploy-v2.sh" -o "$tmp_dep"
-$SUDO install -m 0755 "$tmp_dep" /usr/local/share/mycelium/deploy-v2.sh
+curl -fsSL "${REPO_RAW}/infra/deploy-native.sh" -o "$tmp_dep"
+GHCR_OWNER="$GHCR_OWNER" MYCELIUM_REPO="$MYCELIUM_REPO" MYCELIUM_REF="$MYCELIUM_REF" \
+  PREFIX="$PREFIX" STATE_DIR="$STATE_DIR" SECRETS_FILE="$CONF_DIR/secrets.env" \
+  bash "$tmp_dep"
 rm -f "$tmp_dep"
+install -m 0755 "$tmp_dep" /usr/local/share/mycelium/deploy-native.sh 2>/dev/null || true
 
-# ── Deploy workloads to the running host ─────────────────────────────────────
-if [ "$SKIP_DEPLOY" != "1" ] && command -v nats >/dev/null 2>&1; then
-    log "Deploying workloads (waiting up to 30s for host heartbeat)"
-    OCI_REGISTRY="${GHCR_REGISTRY}/${GHCR_OWNER}/mycelium" \
-    IMAGE_TAG="${MYCELIUM_VERSION}" \
-    NATS_URL="nats://127.0.0.1:4222" \
-    MYCELIUM_SECRETS_FILE="$MYCELIUM_CONF_DIR/secrets.env" \
-    bash /usr/local/share/mycelium/deploy-v2.sh || warn "deploy-v2.sh failed; rerun manually with: mycelium redeploy"
-else
-    log "Skipping deploy (SKIP_DEPLOY=1 or nats CLI missing)"
-fi
-
-# ── Install mycelium CLI ─────────────────────────────────────────────────────
-log "Installing mycelium CLI to $MYCELIUM_PREFIX/bin/mycelium"
+# ── mycelium CLI ────────────────────────────────────────────────────────
+log "Installing mycelium CLI wrapper"
 tmp_cli=$(mktemp)
 curl -fsSL "${REPO_RAW}/infra/mycelium-cli.sh" -o "$tmp_cli"
-$SUDO install -m 0755 "$tmp_cli" "$MYCELIUM_PREFIX/bin/mycelium"
+install -m 0755 "$tmp_cli" "$PREFIX/bin/mycelium"
 rm -f "$tmp_cli"
 
-# ── Done ─────────────────────────────────────────────────────────────────────
-cat <<'EOF'
+cat <<EOF
 
 Mycelium installed.
 
-Quick start:
-  mycelium provider gemini AIza...           # or: openai, anthropic, ollama
-  mycelium token telegram 123:ABC            # (optional) wire up bot
-  mycelium agent create alice --prompt='Be terse.'
-  mycelium chat alice 'hello'
-  mycelium status
-  mycelium logs host
+  config:   $CONF_DIR/secrets.env
+  data:     $STATE_DIR
+  cli:      $PREFIX/bin/mycelium
 
-Files:
-  /etc/mycelium/host.env       (tokens; chmod 600)
-  /var/lib/mycelium            (wash state + NATS data)
-  /etc/systemd/system/mycelium-{nats,host}.service
+next steps:
+  sudo $PREFIX/bin/mycelium init       # populate Telegram + LLM secrets
+  sudo systemctl status mycelium-core mycelium-tool-runner
+  sudo journalctl -u mycelium-core -u mycelium-tool-runner -f
+
 EOF

@@ -8,7 +8,7 @@
 #                                          # writes llm.endpoint/model/api_key + restarts host
 #   mycelium token telegram <bot-token>     # writes telegram.bot_token + restarts host
 #   mycelium model <model-name>             # overrides default llm.model
-#   mycelium restart                        # systemctl restart mycelium-host
+#   mycelium restart                        # systemctl restart mycelium-core + tool-runner
 #   mycelium status                         # service + workload state
 #   mycelium logs [host|nats]               # journalctl -fu mycelium-<service>
 #   mycelium agent create <id> [--name=N] [--prompt=P] [--model=M] [--tools=a,b]
@@ -49,25 +49,11 @@ _kv_write() {
 set_secret() { _kv_write "$SECRETS_FILE" "$1" "$2"; }
 
 redeploy() {
-    log "Redeploying workloads (picks up new secrets without dropping NATS state)"
-    local dep="/usr/local/share/mycelium/deploy-v2.sh"
-    if [ ! -x "$dep" ]; then
-        log "Fetching deploy-v2.sh from ref=${MYCELIUM_REF}"
-        local tmp
-        tmp=$(mktemp)
-        curl -fsSL "https://raw.githubusercontent.com/${GHCR_OWNER}/mycelium/${MYCELIUM_REF}/infra/deploy-v2.sh" -o "$tmp" \
-            || die "could not fetch deploy-v2.sh"
-        $SUDO mkdir -p /usr/local/share/mycelium
-        $SUDO install -m 0755 "$tmp" "$dep"
-        rm -f "$tmp"
-    fi
-    # Run as root so secrets.env (mode 0600) can be sourced.
-    $SUDO env \
-        OCI_REGISTRY="${GHCR_REGISTRY}/${GHCR_OWNER}/mycelium" \
-        IMAGE_TAG="$IMAGE_TAG" \
-        NATS_URL="$NATS_URL" \
-        MYCELIUM_SECRETS_FILE="$SECRETS_FILE" \
-        bash "$dep"
+    log "Restarting native services (picks up new secrets / env without dropping NATS state)"
+    $SUDO systemctl restart mycelium-core.service mycelium-tool-runner.service
+    sleep 2
+    $SUDO systemctl --no-pager --lines 0 status \
+        mycelium-core.service mycelium-tool-runner.service || true
 }
 
 cmd_provider() {
@@ -180,7 +166,7 @@ cmd_tool() {
 }
 
 cmd_status() {
-    $SUDO systemctl --no-pager --lines 0 status mycelium-nats mycelium-host || true
+    $SUDO systemctl --no-pager --lines 0 status mycelium-nats mycelium-core mycelium-tool-runner || true
     echo "--- /health ---"
     curl -sf -H "host: $HOSTHDR" "$API/health" || echo "(no response)"
     echo
@@ -418,7 +404,7 @@ BANNER
 
 usage() {
     cat <<'EOF'
-mycelium — wash host control wrapper
+mycelium — native pipeline control wrapper
 
 Quickstart:
   mycelium init                        # interactive onboarding (LLM + telegram + agent)
@@ -460,7 +446,7 @@ main() {
         model)        cmd_model "$@" ;;
         status)       cmd_status ;;
         logs)         cmd_logs "$@" ;;
-        restart)      log "Restarting mycelium-host (workloads will redeploy)"; $SUDO systemctl restart mycelium-host; sleep 3; redeploy ;;
+        restart)      log "Restarting mycelium-core + mycelium-tool-runner"; $SUDO systemctl restart mycelium-core.service mycelium-tool-runner.service; sleep 2; redeploy ;;
         redeploy)     redeploy ;;
         agent)        cmd_agent "$@" ;;
         tool)         cmd_tool "$@" ;;

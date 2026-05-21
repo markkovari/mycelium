@@ -27,23 +27,11 @@ jobs:
     strategy:
       matrix:
         component:
-          - { dir: gateway,             file: gateway }
-          - { dir: executor,            file: executor }
-          - { dir: agent,               file: agent }
-          - { dir: tool-runner,         file: tool_runner }
-          - { dir: memory-store,        file: memory_store }
-          - { dir: conversation-store,  file: conversation_store }
-          - { dir: router,              file: router }
-          - { dir: event-logger,        file: event_logger }
-          - { dir: telegram-poller,     file: telegram_poller }
-          - { dir: telegram-out,        file: telegram_out }
-          - { dir: channel-router,      file: channel_router }
-          - { dir: session-bridge,      file: session_bridge }
-          - { dir: agent-registry,      file: agent_registry }
-          - { dir: task-publisher,      file: task_publisher }
-          - { dir: tool-time,           file: tool_time }
-          - { dir: tool-calc,           file: tool_calc }
-          - { dir: tool-web-fetch,      file: tool_web_fetch }
+          # Only sandboxed skill components remain wasm. The trusted
+          # pipeline ships as native binaries via .github/workflows/native.yaml.
+          - { dir: tool-time,      file: tool_time }
+          - { dir: tool-calc,      file: tool_calc }
+          - { dir: tool-web-fetch, file: tool_web_fetch }
 
     steps:
       - uses: actions/checkout@v4

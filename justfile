@@ -7,7 +7,9 @@ oci_registry := env_var_or_default("OCI_REGISTRY", "localhost:5001/mycelium")
 image_tag    := env_var_or_default("IMAGE_TAG", "dev")
 http_addr    := env_var_or_default("HTTP_ADDR", "0.0.0.0:8080")
 
-components := "gateway executor agent tool-runner memory-store conversation-store router event-logger telegram-poller telegram-out channel-router session-bridge agent-registry task-publisher tool-time tool-calc tool-web-fetch"
+# Only the sandboxed skill components remain as wasm. Pipeline is native.
+components := "tool-time tool-calc tool-web-fetch"
+native_bins := "mycelium-core mycelium-tool-runner"
 
 default:
     @just --list
