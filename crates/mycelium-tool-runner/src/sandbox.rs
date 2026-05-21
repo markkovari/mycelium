@@ -155,20 +155,16 @@ impl Sandbox {
             .map_err(|e| SandboxError::Internal(format!("load component: {e}")))?;
 
         let mut linker: Linker<SkillCtx> = Linker::new(&self.engine);
-        let needs_wasi = manifest
-            .capabilities
-            .iter()
-            .any(|c| c.starts_with("wasi:"));
-        if needs_wasi {
-            // wasmtime-wasi 27's helper adds every wasi:* interface to the
-            // Linker. That's coarser than the per-cap gating we eventually
-            // want — but the manifest declaring the caps + the operator
-            // allow-list still keep the policy boundary in place. (The
-            // skill's own component WIT only imports the subset it
-            // actually uses.)
-            wasmtime_wasi::add_to_linker_async(&mut linker)
-                .map_err(|e| SandboxError::Internal(format!("link wasi: {e}")))?;
-        }
+        // wasm32-wasip2 components always import wasi:io / wasi:cli /
+        // wasi:filesystem transitively via wit-bindgen's runtime helpers,
+        // even when the skill itself never calls wasi. Add the WASI host
+        // unconditionally; the capability-gate is enforced at the manifest
+        // layer (the WasiCtxBuilder below is the empty default — no FS, no
+        // network, no env access). add_to_linker_async pulls every wasi:*
+        // interface in, but the resources they expose are scoped to the
+        // builder configuration.
+        wasmtime_wasi::add_to_linker_async(&mut linker)
+            .map_err(|e| SandboxError::Internal(format!("link wasi: {e}")))?;
         if manifest
             .capabilities
             .iter()
@@ -178,11 +174,10 @@ impl Sandbox {
                 .map_err(|e| SandboxError::Internal(format!("link wasi:http: {e}")))?;
         }
 
-        let wasi_ctx = if needs_wasi {
-            Some(WasiCtxBuilder::new().inherit_stderr().build())
-        } else {
-            None
-        };
+        // Minimal WasiCtx by default. Skills that declared wasi:* caps in
+        // their manifest still only get whatever the builder is configured
+        // for; we keep stderr inherit on so error output reaches journald.
+        let wasi_ctx = Some(WasiCtxBuilder::new().inherit_stderr().build());
         let limits = StoreLimitsBuilder::new()
             .memory_size(mem_max as usize)
             .build();
