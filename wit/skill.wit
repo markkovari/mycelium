@@ -1,0 +1,31 @@
+/// The slim WIT world skills are compiled against.
+///
+/// Skills export `mycelium:tool/tool-provider.invoke` (pure function call:
+/// JSON arguments in, JSON result out). The runner is the only entity that
+/// touches NATS — skills do not subscribe to anything.
+///
+/// Skills MAY import any of the wasi:* interfaces listed below; the runner
+/// only adds an import to the wasmtime Linker when (a) the skill's manifest
+/// declared the capability AND (b) the operator approved that capability in
+/// the runner's allow-list. Imports the host has not added cause an
+/// instantiate-time link error, which is exactly the "deny-by-default"
+/// posture we want for untrusted skill code.
+
+package mycelium:skill@0.1.0;
+
+world skill {
+    export mycelium:tool/tool-provider@0.1.0;
+
+    // Capability surface that the runner is willing to provide on demand.
+    // Skills may or may not declare/use any subset of these in their
+    // own component WIT.
+    import wasi:clocks/wall-clock@0.2.2;
+    import wasi:clocks/monotonic-clock@0.2.2;
+    import wasi:io/error@0.2.2;
+    import wasi:io/streams@0.2.2;
+    import wasi:io/poll@0.2.2;
+    import wasi:http/types@0.2.2;
+    import wasi:http/outgoing-handler@0.2.2;
+    import wasi:logging/logging@0.1.0-draft;
+    import wasi:random/random@0.2.2;
+}
