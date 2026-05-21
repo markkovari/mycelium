@@ -84,13 +84,38 @@ async fn handle_call(
         Some(n) if !n.is_empty() => n.to_string(),
         _ => return Ok(()),
     };
-    let req: ToolCallReq = serde_json::from_slice(&msg.payload).context("decode tool.call")?;
-    tracing::debug!(skill = %name, call_id = %req.call_id, "dispatching");
+    // The executor publishes the call payload with task_id at the top level
+    // (alongside call_id + arguments). Parse the raw envelope first so we can
+    // round-trip task_id into the outgoing tool.result — executor needs it to
+    // look up the right task state.
+    let envelope: serde_json::Value =
+        serde_json::from_slice(&msg.payload).context("decode tool.call")?;
+    let task_id = envelope
+        .get("task_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let call_id = envelope
+        .get("call_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let arguments = envelope
+        .get("arguments")
+        .and_then(|v| v.as_str())
+        .unwrap_or("{}")
+        .to_string();
+    let req = ToolCallReq {
+        call_id: call_id.clone(),
+        tool_id: name.clone(),
+        arguments,
+    };
+    tracing::debug!(skill = %name, task_id = %task_id, call_id = %call_id, "dispatching");
 
     let resp = match registry.get(&name).await {
         Ok(Some(manifest)) => invoke_one(&manifest, loader, sandbox, js, req).await,
         Ok(None) => ToolCallResp {
-            call_id: req.call_id.clone(),
+            call_id: call_id.clone(),
             tool_id: name.clone(),
             output_json: format!(
                 r#"{{"error":"skill {} not registered (operator must register manifest)"}}"#,
@@ -99,14 +124,14 @@ async fn handle_call(
             is_error: true,
         },
         Err(e) => ToolCallResp {
-            call_id: req.call_id.clone(),
+            call_id: call_id.clone(),
             tool_id: name.clone(),
             output_json: format!(r#"{{"error":"registry lookup failed: {}"}}"#, e),
             is_error: true,
         },
     };
 
-    publish_result(nats, &resp).await?;
+    publish_result(nats, &task_id, &resp).await?;
     Ok(())
 }
 
@@ -139,13 +164,16 @@ async fn invoke_one(
     }
 }
 
-async fn publish_result(nats: &async_nats::Client, resp: &ToolCallResp) -> Result<()> {
-    // Executor expects {task_id, call_id, output, error?}. ToolCallResp here
-    // mirrors the existing schema except for keying (we don't know task_id;
-    // executor recovers that from call_id via its in-flight task state).
-    // For backwards-compat with the existing executor we publish a payload
-    // that contains both call_id and output/error.
+async fn publish_result(
+    nats: &async_nats::Client,
+    task_id: &str,
+    resp: &ToolCallResp,
+) -> Result<()> {
+    // Executor expects {task_id, call_id, output, error?}. We round-trip
+    // task_id from the inbound tool.call envelope so executor can look up
+    // its in-flight task state and decide whether to re-arm step.agent.
     let body = serde_json::json!({
+        "task_id": task_id,
         "call_id": resp.call_id,
         "tool_id": resp.tool_id,
         "output": if resp.is_error { serde_json::Value::Null } else { serde_json::Value::String(resp.output_json.clone()) },
