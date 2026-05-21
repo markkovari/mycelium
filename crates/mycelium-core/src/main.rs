@@ -95,11 +95,11 @@ async fn main() -> Result<()> {
         _ = tokio::signal::ctrl_c() => {
             tracing::info!("ctrl-c received, draining tasks");
         }
-        // If any task panics or otherwise stops on its own, treat as fatal.
-        // (Graceful exit is signalled via `tracing::info!("... exited cleanly")`
-        // above; we don't break the loop unless ctrl_c fires.)
-        _ = wait_for_any_panic(&mut tasks) => {
-            tracing::warn!("a module task ended unexpectedly; shutting the rest down");
+        // Only treat panics as fatal. Modules that finish cleanly (e.g. gateway
+        // disabled via empty GATEWAY_LISTEN) are expected; the rest of the
+        // pipeline keeps running.
+        _ = wait_for_panic(&mut tasks) => {
+            tracing::warn!("a module task panicked; shutting the rest down");
         }
     }
 
@@ -125,10 +125,21 @@ fn init_tracing() {
         .init();
 }
 
-async fn wait_for_any_panic(tasks: &mut JoinSet<()>) {
-    if let Some(res) = tasks.join_next().await {
-        if let Err(e) = res {
-            tracing::error!(error = %e, "module task panicked");
+async fn wait_for_panic(tasks: &mut JoinSet<()>) {
+    while let Some(res) = tasks.join_next().await {
+        match res {
+            Ok(()) => {
+                // Module returned Ok — likely disabled by config. Keep waiting.
+                continue;
+            }
+            Err(e) if e.is_panic() => {
+                tracing::error!(error = %e, "module task panicked");
+                return;
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "module task ended with non-panic error");
+                continue;
+            }
         }
     }
 }
