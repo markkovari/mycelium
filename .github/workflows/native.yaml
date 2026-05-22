@@ -10,6 +10,7 @@ on:
       - 'crates/mycelium-types/**'
       - 'crates/mycelium-agent-core/**'
       - 'crates/mycelium-tool-core/**'
+      - 'crates/mycelium-wasm-host/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/workflows/native.yaml'
