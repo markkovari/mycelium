@@ -58,6 +58,8 @@ create_kv mycelium-tools
 create_kv mycelium-skills          # tool-runner: skill manifests
 create_kv mycelium-skill-policy    # tool-runner: per-operator allow-list overrides
 create_kv mycelium-sessions        # mycelium-core: cross-task session records
+create_kv mycelium-hooks           # hook-runner: hook manifests, keyed by event name
+create_kv mycelium-hook-policy     # hook-runner: per-operator allow-list overrides
 
 echo ""
 echo "Seeding default tool schemas (mycelium-tools KV)..."

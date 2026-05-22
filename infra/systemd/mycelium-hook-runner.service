@@ -1,0 +1,38 @@
+[Unit]
+Description=mycelium hook runner (wasmtime sandbox for lifecycle hooks)
+Documentation=https://github.com/markkovari/mycelium
+Requires=mycelium-nats.service
+After=mycelium-nats.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mycelium
+Group=mycelium
+EnvironmentFile=-/etc/mycelium/secrets.env
+EnvironmentFile=-/etc/mycelium/mycelium-hook-runner.env
+WorkingDirectory=/var/lib/mycelium
+ExecStart=/usr/local/bin/mycelium-hook-runner
+Restart=always
+RestartSec=3s
+
+# Hook-runner instantiates untrusted hook components in wasmtime; the
+# runtime itself is already capability-sandboxed per hook manifest.
+# Process-level hardening on top guards the runner binary from anything
+# escaping its own bugs.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/mycelium /var/lib/mycelium/hook-cache
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictRealtime=true
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

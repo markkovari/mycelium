@@ -8,6 +8,7 @@ members = [
     # Native pipeline + tool runner + shared crates.
     "crates/mycelium-core",
     "crates/mycelium-tool-runner",
+    "crates/mycelium-hook-runner",
     "crates/mycelium-types",
     "crates/mycelium-agent-core",
     "crates/mycelium-tool-core",
@@ -22,6 +23,7 @@ members = [
 default-members = [
     "crates/mycelium-core",
     "crates/mycelium-tool-runner",
+    "crates/mycelium-hook-runner",
     "crates/mycelium-types",
     "crates/mycelium-agent-core",
     "crates/mycelium-tool-core",
