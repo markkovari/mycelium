@@ -52,7 +52,7 @@ rustyline           = "14"
 mycelium-types            = { path = "crates/mycelium-types" }
 mycelium-agent-core       = { path = "crates/mycelium-agent-core" }
 mycelium-tool-core        = { path = "crates/mycelium-tool-core" }
-reqwest                   = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "gzip", "brotli"] }
+reqwest                   = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "gzip", "brotli", "stream"] }
 chrono                    = { version = "0.4", features = ["serde", "clock"] }
 thiserror                 = "2"
 bytes                     = "1"

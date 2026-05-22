@@ -15,16 +15,23 @@
 //!   POST /conversations/:id/messages
 //!   DELETE /conversations/:id
 
+use std::convert::Infallible;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
+use async_nats::Client as NatsClient;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
-    response::IntoResponse,
+    response::{
+        sse::{Event, KeepAlive, Sse},
+        IntoResponse,
+    },
     routing::get,
     Json, Router,
 };
+use futures_util::{Stream, StreamExt};
 use mycelium_types::{AgentConfig, MessageRole};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -39,6 +46,7 @@ use crate::{
 struct GatewayState {
     registry: AgentRegistry,
     convs: ConversationStore,
+    nats: NatsClient,
 }
 
 pub async fn run(
@@ -52,7 +60,11 @@ pub async fn run(
         return Ok(());
     }
 
-    let gw_state = Arc::new(GatewayState { registry, convs });
+    let gw_state = Arc::new(GatewayState {
+        registry,
+        convs,
+        nats: state.nats.clone(),
+    });
     let app = Router::new()
         .route("/health", get(health))
         .route("/agents", get(list_agents).post(create_agent))
@@ -72,6 +84,7 @@ pub async fn run(
             "/conversations/:id/messages",
             get(get_messages).post(append_message),
         )
+        .route("/runs/:id/stream", get(stream_run))
         .with_state(gw_state);
 
     let listener = TcpListener::bind(&state.config.gateway_listen)
@@ -327,6 +340,40 @@ async fn get_messages(
         ),
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
     }
+}
+
+async fn stream_run(
+    Path(run_id): Path<String>,
+    State(s): State<Arc<GatewayState>>,
+) -> impl IntoResponse {
+    let assistant = format!("mycelium.run.{run_id}.assistant");
+    let lifecycle = format!("mycelium.run.{run_id}.lifecycle");
+    let sub_a = match s.nats.subscribe(assistant).await {
+        Ok(s) => s,
+        Err(e) => {
+            return err(StatusCode::INTERNAL_SERVER_ERROR, anyhow::anyhow!("{e}"))
+                .into_response();
+        }
+    };
+    let sub_l = match s.nats.subscribe(lifecycle).await {
+        Ok(s) => s,
+        Err(e) => {
+            return err(StatusCode::INTERNAL_SERVER_ERROR, anyhow::anyhow!("{e}"))
+                .into_response();
+        }
+    };
+    let combined = futures_util::stream::select(
+        sub_a.map(|m| ("assistant", m)),
+        sub_l.map(|m| ("lifecycle", m)),
+    );
+    let events: std::pin::Pin<Box<dyn Stream<Item = Result<Event, Infallible>> + Send>> =
+        Box::pin(combined.map(|(kind, m)| {
+            let payload = String::from_utf8_lossy(&m.payload).into_owned();
+            Ok(Event::default().event(kind).data(payload))
+        }));
+    Sse::new(events)
+        .keep_alive(KeepAlive::new().interval(Duration::from_secs(15)))
+        .into_response()
 }
 
 // ─────────────────────────── helpers ───────────────────────────

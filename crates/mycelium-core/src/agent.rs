@@ -87,6 +87,16 @@ struct StepReq {
     task_id: String,
     conversation_id: String,
     agent_id: String,
+    #[serde(default)]
+    run_id: String,
+}
+
+#[derive(Deserialize)]
+struct StreamCtxState {
+    #[serde(default)]
+    chat_id: String,
+    #[serde(default)]
+    progress_message_id: i64,
 }
 
 async fn handle_step(
@@ -180,13 +190,29 @@ async fn handle_step(
 
     let tool_specs = load_tool_specs(tools_kv, &tool_names).await;
 
-    match call_llm(
+    let stream_ctx: StreamCtxState = state_kv
+        .get(format!("task/{}", req.task_id))
+        .await
+        .ok()
+        .flatten()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or(StreamCtxState {
+            chat_id: String::new(),
+            progress_message_id: 0,
+        });
+
+    match call_llm_streaming(
         &state.http,
+        &state.nats,
         &endpoint,
         &model,
         &api_key,
         &messages,
         &tool_specs,
+        &req.run_id,
+        &req.task_id,
+        &stream_ctx.chat_id,
+        stream_ctx.progress_message_id,
     )
     .await
     {
@@ -355,13 +381,19 @@ struct ToolCall {
     arguments: String,
 }
 
-async fn call_llm(
+#[allow(clippy::too_many_arguments)]
+async fn call_llm_streaming(
     http: &reqwest::Client,
+    nats: &async_nats::Client,
     endpoint: &str,
     model: &str,
     api_key: &str,
     messages: &[Value],
     tools: &[Value],
+    run_id: &str,
+    task_id: &str,
+    chat_id: &str,
+    progress_message_id: i64,
 ) -> Result<LlmReply> {
     const MAX_ATTEMPTS: u32 = 4;
     const MAX_DELAY_S: u64 = 60;
@@ -371,65 +403,173 @@ async fn call_llm(
         let mut body = json!({
             "model": model,
             "messages": messages,
-            "stream": false,
+            "stream": true,
         });
         if !tools.is_empty() {
             body["tools"] = Value::Array(tools.to_vec());
             body["tool_choice"] = json!("auto");
         }
-        let mut req = http.post(endpoint).json(&body).timeout(Duration::from_secs(75));
+        let mut req = http
+            .post(endpoint)
+            .json(&body)
+            .timeout(Duration::from_secs(75));
         if !api_key.is_empty() {
             req = req.bearer_auth(api_key);
         }
         let resp = req.send().await.context("LLM send")?;
         let status = resp.status();
-        let bytes = resp.bytes().await.context("LLM body")?;
-        if status.is_success() {
-            let parsed: Value = serde_json::from_slice(&bytes).context("decode LLM resp")?;
-            if let Some(arr) = parsed
-                .pointer("/choices/0/message/tool_calls")
-                .and_then(|v| v.as_array())
-            {
-                let mut calls = Vec::with_capacity(arr.len());
-                for c in arr {
-                    let id = c.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                    let name = c
-                        .pointer("/function/name")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string();
-                    let arguments = c
-                        .pointer("/function/arguments")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("{}")
-                        .to_string();
-                    if !name.is_empty() {
-                        calls.push(ToolCall { id, name, arguments });
+        if !status.is_success() {
+            let bytes = resp.bytes().await.context("LLM body")?;
+            let retryable = status.as_u16() == 429 || status.is_server_error();
+            if retryable && attempt < MAX_ATTEMPTS {
+                let delay = parse_retry_delay_seconds(&bytes)
+                    .unwrap_or_else(|| 1u64 << (attempt - 1))
+                    .min(MAX_DELAY_S);
+                tokio::time::sleep(Duration::from_secs(delay)).await;
+                continue;
+            }
+            let snippet = String::from_utf8_lossy(&bytes);
+            let snippet_chars: String = snippet.chars().take(400).collect();
+            return Err(anyhow::anyhow!(
+                "HTTP {}: {}",
+                status.as_u16(),
+                snippet_chars
+            ));
+        }
+
+        let reply = consume_sse_stream(
+            resp,
+            nats,
+            run_id,
+            task_id,
+            chat_id,
+            progress_message_id,
+        )
+        .await?;
+        return Ok(reply);
+    }
+}
+
+/// Read an OpenAI-compatible SSE stream from `resp`. Each `data: {...}` line
+/// is parsed; text deltas are republished to NATS for streaming consumers
+/// (telegram_out debouncer, gateway SSE bridge). Tool-call deltas accumulate
+/// by `index` and the final assembled set is returned as `LlmReply::Tools`.
+async fn consume_sse_stream(
+    resp: reqwest::Response,
+    nats: &async_nats::Client,
+    run_id: &str,
+    task_id: &str,
+    chat_id: &str,
+    progress_message_id: i64,
+) -> Result<LlmReply> {
+    use std::collections::BTreeMap;
+    let mut stream = resp.bytes_stream();
+    let mut buf = String::new();
+    let mut text_acc = String::new();
+    let mut tool_acc: BTreeMap<usize, (String, String, String)> = BTreeMap::new();
+    let mut seq: u64 = 0;
+    let subject = if run_id.is_empty() {
+        String::new()
+    } else {
+        format!("mycelium.run.{run_id}.assistant")
+    };
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.context("LLM stream chunk")?;
+        buf.push_str(&String::from_utf8_lossy(&chunk));
+        while let Some(idx) = buf.find("\n\n") {
+            let event = buf[..idx].to_string();
+            buf.drain(..idx + 2);
+            for line in event.lines() {
+                let Some(payload) = line.strip_prefix("data:").map(str::trim) else {
+                    continue;
+                };
+                if payload == "[DONE]" {
+                    continue;
+                }
+                let Ok(parsed) = serde_json::from_str::<Value>(payload) else {
+                    continue;
+                };
+                let Some(delta) = parsed.pointer("/choices/0/delta") else {
+                    continue;
+                };
+                if let Some(text) = delta.get("content").and_then(|v| v.as_str()) {
+                    if !text.is_empty() {
+                        text_acc.push_str(text);
+                        seq += 1;
+                        if !subject.is_empty() {
+                            let env = json!({
+                                "delta": text,
+                                "done": false,
+                                "seq": seq,
+                                "task_id": task_id,
+                                "chat_id": chat_id,
+                                "progress_message_id": progress_message_id,
+                            });
+                            if let Ok(bytes) = serde_json::to_vec(&env) {
+                                let _ = nats.publish(subject.clone(), bytes.into()).await;
+                            }
+                        }
                     }
                 }
-                if !calls.is_empty() {
-                    return Ok(LlmReply::Tools(calls));
+                if let Some(arr) = delta.get("tool_calls").and_then(|v| v.as_array()) {
+                    for tc in arr {
+                        let index = tc.get("index").and_then(|v| v.as_u64()).unwrap_or(0)
+                            as usize;
+                        let entry = tool_acc.entry(index).or_default();
+                        if let Some(id) = tc.get("id").and_then(|v| v.as_str()) {
+                            if !id.is_empty() {
+                                entry.0 = id.to_string();
+                            }
+                        }
+                        if let Some(name) =
+                            tc.pointer("/function/name").and_then(|v| v.as_str())
+                        {
+                            if !name.is_empty() {
+                                entry.1 = name.to_string();
+                            }
+                        }
+                        if let Some(args) =
+                            tc.pointer("/function/arguments").and_then(|v| v.as_str())
+                        {
+                            entry.2.push_str(args);
+                        }
+                    }
                 }
             }
-            let content = parsed
-                .pointer("/choices/0/message/content")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            return Ok(LlmReply::Text(content));
         }
-        let retryable = status.as_u16() == 429 || status.is_server_error();
-        if retryable && attempt < MAX_ATTEMPTS {
-            let delay = parse_retry_delay_seconds(&bytes)
-                .unwrap_or_else(|| 1u64 << (attempt - 1))
-                .min(MAX_DELAY_S);
-            tokio::time::sleep(Duration::from_secs(delay)).await;
-            continue;
-        }
-        let snippet = String::from_utf8_lossy(&bytes);
-        let snippet_chars: String = snippet.chars().take(400).collect();
-        return Err(anyhow::anyhow!("HTTP {}: {}", status.as_u16(), snippet_chars));
     }
+    if !subject.is_empty() {
+        let env = json!({
+            "delta": "",
+            "done": true,
+            "seq": seq + 1,
+            "task_id": task_id,
+            "chat_id": chat_id,
+            "progress_message_id": progress_message_id,
+        });
+        if let Ok(bytes) = serde_json::to_vec(&env) {
+            let _ = nats.publish(subject, bytes.into()).await;
+        }
+    }
+    if !tool_acc.is_empty() {
+        let calls: Vec<ToolCall> = tool_acc
+            .into_values()
+            .filter(|(_, name, _)| !name.is_empty())
+            .map(|(id, name, arguments)| ToolCall {
+                id,
+                name,
+                arguments: if arguments.is_empty() {
+                    "{}".into()
+                } else {
+                    arguments
+                },
+            })
+            .collect();
+        if !calls.is_empty() {
+            return Ok(LlmReply::Tools(calls));
+        }
+    }
+    Ok(LlmReply::Text(text_acc))
 }
 
 fn parse_retry_delay_seconds(body: &[u8]) -> Option<u64> {
