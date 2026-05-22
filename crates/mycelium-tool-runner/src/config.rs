@@ -28,6 +28,7 @@ impl Default for Config {
             approved_capabilities: vec![
                 "wasi:clocks/wall-clock".into(),
                 "wasi:logging/logging".into(),
+                "wasi:keyvalue/store@0.2.0-draft".into(),
             ],
             default_fuel_limit: 500_000_000,
             default_memory_max: 16 * 1024 * 1024,

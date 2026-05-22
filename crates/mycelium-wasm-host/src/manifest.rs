@@ -3,8 +3,22 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Declares how the runner should interact with this wasm component.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ComponentKind {
+    /// Exports `mycelium:tool/tool-provider` — single tool per component.
+    #[default]
+    Skill,
+    /// Exports `mycelium:mcp/mcp-provider` — N tools discovered via `list-tools`.
+    McpServer,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ComponentManifest {
+    /// Skill (default) or MCP server.
+    #[serde(default)]
+    pub kind: ComponentKind,
     pub name: String,
     pub version: String,
     /// Origin of the wasm binary. Runner tries: cache → fetch.

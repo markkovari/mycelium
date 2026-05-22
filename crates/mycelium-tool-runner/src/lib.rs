@@ -7,15 +7,15 @@
 //! fuel + epoch interruption + memory cap, and publishes
 //! `mycelium.tool.result` with the output.
 //!
-//! Designed as a standalone process so wash's per-message-instantiation
-//! and unbounded `tokio::spawn` don't apply. The actual wasmtime call
-//! chain is the only place mycelium runs wasm anywhere.
+//! Standalone process; wasmtime is the only wasm runtime in mycelium.
 
 pub mod config;
+pub mod kv_host;
+pub mod mcp_registry;
 pub mod registry;
 pub mod sandbox;
 
 pub use mycelium_wasm_host::{
-    loader::Loader, manifest::ComponentManifest as SkillManifest,
+    loader::Loader, manifest::ComponentKind, manifest::ComponentManifest as SkillManifest,
     manifest::ComponentSource as SkillSource,
 };

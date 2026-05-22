@@ -1,12 +1,10 @@
 //! mycelium-core: the trusted-pipeline binary.
 //!
-//! Replaces the wash-orchestrated wasm components (telegram-poller,
+//! Single tokio process containing all pipeline modules (telegram-poller,
 //! channel-router, executor, agent, conversation-store, memory-store,
-//! agent-registry, event-logger, router, telegram-out, gateway) with a single
-//! tokio process. Cross-module calls that used to be WIT-linked are now plain
-//! `async fn` calls; NATS subjects between modules use async-nats JetStream
-//! pull consumers with queue groups so wash's per-message-instance fanout
-//! cannot multiply work anymore.
+//! agent-registry, event-logger, router, telegram-out, gateway). Cross-module
+//! calls are plain `async fn`; NATS subjects use JetStream pull consumers with
+//! queue groups for single delivery.
 //!
 //! Skill execution lives in a separate process — see `mycelium-tool-runner`.
 

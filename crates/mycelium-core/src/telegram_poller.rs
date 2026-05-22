@@ -5,10 +5,7 @@
 //! `mycelium.channel.telegram.raw`, advance offset in
 //! `mycelium-telegram-poller-state` KV.
 //!
-//! No more lease lock, no more tick re-arm cooldown, no more lock-until KV
-//! shenanigans. Those existed only because wash 2.1.0 fanned every tick to
-//! N parallel component instances, causing exponential storms. Native runs
-//! one instance; the loop is the only loop.
+//! One instance; the loop is the only loop.
 
 use anyhow::{Context, Result};
 use async_nats::jetstream::kv::Store;

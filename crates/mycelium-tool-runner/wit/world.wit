@@ -1,0 +1,5 @@
+package mycelium:kv-host@0.1.0;
+
+world kv-host {
+    import wasi:keyvalue/store@0.2.0-draft;
+}

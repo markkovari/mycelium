@@ -12,6 +12,7 @@ on:
       - 'crates/mycelium-tool-core/**'
       - 'crates/mycelium-wasm-host/**'
       - 'crates/mycelium-hook-runner/**'
+      - 'components/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/workflows/native.yaml'
@@ -72,6 +73,72 @@ jobs:
           sha256sum "$ARTIFACT" > "$ARTIFACT.sha256"
           echo "artifact=$ARTIFACT" >> "$GITHUB_OUTPUT"
         id: pack
+
+      - name: Upload as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.pack.outputs.artifact }}
+          path: |
+            ${{ steps.pack.outputs.artifact }}
+            ${{ steps.pack.outputs.artifact }}.sha256
+          retention-days: 14
+
+      - name: Attach to release (tag pushes only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ steps.pack.outputs.artifact }}
+            ${{ steps.pack.outputs.artifact }}.sha256
+
+  build-wasm:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        component:
+          - mcp-demo
+          - mcp-todo
+          - tool-time
+          - tool-calc
+          - tool-web-fetch
+          - hook-trace
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust + wasm target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip1
+
+      - name: Install cargo-component
+        run: cargo install cargo-component --locked
+
+      - name: Build ${{ matrix.component }}
+        run: cargo component build --release -p ${{ matrix.component }}
+
+      - name: Resolve version tag
+        id: ver
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=dev-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Package
+        id: pack
+        run: |
+          COMP="${{ matrix.component }}"
+          FILE="${COMP//-/_}.wasm"
+          ARTIFACT="${COMP}-${{ steps.ver.outputs.tag }}.wasm"
+          cp "target/wasm32-wasip1/release/$FILE" "$ARTIFACT"
+          sha256sum "$ARTIFACT" > "$ARTIFACT.sha256"
+          echo "artifact=$ARTIFACT" >> "$GITHUB_OUTPUT"
+          echo "file=$FILE" >> "$GITHUB_OUTPUT"
 
       - name: Upload as workflow artifact
         uses: actions/upload-artifact@v4

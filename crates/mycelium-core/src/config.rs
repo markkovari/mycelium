@@ -40,9 +40,7 @@ pub struct Config {
     /// module is enabled. Empty disables the gateway.
     pub gateway_listen: String,
 
-    /// Comma-separated module names to disable. Useful for staging the
-    /// rollout (start mycelium-core alongside wash, with disabled modules
-    /// to avoid double-consuming subjects).
+    /// Comma-separated module names to disable at startup.
     pub disabled_modules: Vec<String>,
 }
 

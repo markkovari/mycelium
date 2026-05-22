@@ -6,6 +6,8 @@ members = [
     "components/tool-calc",
     "components/tool-web-fetch",
     "components/hook-trace",
+    "components/mcp-demo",
+    "components/mcp-todo",
     # Native pipeline + tool runner + shared crates.
     "crates/mycelium-core",
     "crates/mycelium-tool-runner",
@@ -61,6 +63,7 @@ mycelium-wasm-host        = { path = "crates/mycelium-wasm-host" }
 reqwest                   = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "gzip", "brotli", "stream"] }
 chrono                    = { version = "0.4", features = ["serde", "clock"] }
 thiserror                 = "2"
+async-trait               = "0.1"
 bytes                     = "1"
 toml                      = "0.8"
 dotenvy                   = "0.15"

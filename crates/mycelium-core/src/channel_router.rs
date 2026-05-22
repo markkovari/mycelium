@@ -1,12 +1,8 @@
 //! Channel router: normalises per-channel raw events to `mycelium.channel.in`
 //! and demuxes admin slash commands.
 //!
-//! Native rewrite of `components/channel-router/src/lib.rs`. Cross-component
-//! WIT calls (`mycelium:agent/agent-registry`, `mycelium:conversation`)
-//! collapse into direct method calls on the in-proc `AgentRegistry` /
-//! `ConversationStore`. The wash workarounds drop out: no `seen_update`
-//! marker-CAS, no deterministic `tg-<update_id>` task ids, no inline
-//! Telegram fallback for `step.result` (executor owns that now).
+//! Direct method calls on the in-proc `AgentRegistry` / `ConversationStore`.
+//! Executor owns `step.result` Telegram feedback.
 
 use std::sync::Arc;
 

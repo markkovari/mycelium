@@ -12,4 +12,4 @@ pub mod loader;
 pub mod manifest;
 
 pub use loader::{Loader, LoaderConfig};
-pub use manifest::{ComponentManifest, ComponentSource};
+pub use manifest::{ComponentKind, ComponentManifest, ComponentSource};

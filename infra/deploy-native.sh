@@ -115,15 +115,24 @@ RUST_LOG=info,mycelium_core=debug
 EOF
   chmod 0644 /etc/mycelium/mycelium-core.env
 fi
+APPROVED_CAPS="wasi:clocks/wall-clock,wasi:clocks/monotonic-clock,wasi:io/streams,wasi:io/poll,wasi:io/error,wasi:http/outgoing-handler,wasi:http/types,wasi:logging/logging,wasi:random/random,wasi:keyvalue/store@0.2.0-draft"
+
 if [ ! -f /etc/mycelium/mycelium-tool-runner.env ]; then
-  cat > /etc/mycelium/mycelium-tool-runner.env <<'EOF'
+  cat > /etc/mycelium/mycelium-tool-runner.env <<EOF
 # Operator allow-list of capability strings (comma-separated).
 # Skills declaring anything outside this set are refused at load time.
-MYCELIUM_APPROVED_CAPS=wasi:clocks/wall-clock,wasi:clocks/monotonic-clock,wasi:io/streams,wasi:io/poll,wasi:io/error,wasi:http/outgoing-handler,wasi:http/types,wasi:logging/logging,wasi:random/random
+MYCELIUM_APPROVED_CAPS=${APPROVED_CAPS}
 MYCELIUM_SKILL_CACHE_DIR=/var/lib/mycelium/skill-cache
 RUST_LOG=info,mycelium_tool_runner=debug
 EOF
   chmod 0644 /etc/mycelium/mycelium-tool-runner.env
+else
+  # Upgrade existing env: add wasi:keyvalue if not already present.
+  if ! grep -q "wasi:keyvalue" /etc/mycelium/mycelium-tool-runner.env; then
+    log "adding wasi:keyvalue/store to approved caps"
+    sed -i "s|MYCELIUM_APPROVED_CAPS=.*|MYCELIUM_APPROVED_CAPS=${APPROVED_CAPS}|" \
+      /etc/mycelium/mycelium-tool-runner.env
+  fi
 fi
 [ -f "$SECRETS_FILE" ] || warn "$SECRETS_FILE missing; mycelium-core will not have Telegram + LLM creds"
 
@@ -143,5 +152,85 @@ systemctl --no-pager --lines 0 status \
   mycelium-nats.service \
   mycelium-core.service \
   mycelium-tool-runner.service || true
+
+# ── MCP wasm components ─────────────────────────────────────────────────────
+# Download and register built-in MCP server components from CI artifacts.
+# Requires: gh CLI authenticated, NATS running locally.
+#
+# Each entry: "<name> <capabilities-csv> <source-spec>"
+# source-spec is the JSON value for the "source" field in the install manifest.
+MCP_COMPONENTS=(
+  "mcp-todo wasi:keyvalue/store@0.2.0-draft,wasi:clocks/wall-clock nats-object:mycelium-components:mcp-todo.wasm"
+  "mcp-demo wasi:clocks/wall-clock nats-object:mycelium-components:mcp-demo.wasm"
+)
+
+install_mcp_components() {
+  if ! command -v nats >/dev/null; then
+    warn "nats CLI not found; skipping MCP component registration"
+    return
+  fi
+
+  local run_id=""
+  if command -v gh >/dev/null; then
+    run_id=$(gh -R "$MYCELIUM_REPO" run list \
+      --workflow=native.yaml --branch="$MYCELIUM_REF" --status=success \
+      --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null) || true
+  fi
+
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  trap "rm -rf $tmpdir" RETURN
+
+  for entry in "${MCP_COMPONENTS[@]}"; do
+    local name caps src_spec
+    name=$(echo "$entry" | awk '{print $1}')
+    caps=$(echo "$entry" | awk '{print $2}')
+    src_spec=$(echo "$entry" | awk '{print $3}')
+    local src_type bucket obj_key
+    src_type=$(echo "$src_spec" | cut -d: -f1)
+    bucket=$(echo "$src_spec" | cut -d: -f2)
+    obj_key=$(echo "$src_spec" | cut -d: -f3)
+    local file_name="${name//-/_}.wasm"
+
+    log "installing MCP component: $name"
+
+    # Download wasm from CI artifact if available.
+    local wasm_path=""
+    if [ -n "$run_id" ] && command -v gh >/dev/null; then
+      gh -R "$MYCELIUM_REPO" run download "$run_id" --dir "$tmpdir" \
+        --pattern "${name}-*.wasm" 2>/dev/null || true
+      wasm_path=$(find "$tmpdir" -name "${name}-*.wasm" ! -name "*.sha256" | head -1)
+    fi
+
+    if [ -z "$wasm_path" ]; then
+      warn "  could not fetch $name wasm; skipping"
+      continue
+    fi
+
+    # Push to NATS object store.
+    nats obj put "$bucket" "$wasm_path" --name "$obj_key" 2>/dev/null \
+      || nats object put "$bucket" "$wasm_path" --name "$obj_key" 2>/dev/null \
+      || { warn "  nats obj put failed for $name; skipping"; continue; }
+
+    # Build source JSON.
+    local src_json="{\"type\":\"nats-object\",\"bucket\":\"$bucket\",\"key\":\"$obj_key\"}"
+    # Build caps JSON array.
+    local caps_json
+    caps_json=$(echo "$caps" | tr ',' '\n' | jq -R . | jq -cs .)
+
+    local manifest
+    manifest=$(jq -n \
+      --arg name "$name" \
+      --argjson caps "$caps_json" \
+      --argjson src "$src_json" \
+      '{"kind":"mcp-server","name":$name,"version":"0.1.0","capabilities":$caps,"source":$src}')
+
+    nats pub mycelium.mcp.install "$manifest" 2>/dev/null \
+      && log "  $name installed" \
+      || warn "  $name install publish failed"
+  done
+}
+
+install_mcp_components
 
 log "done. tail logs: sudo journalctl -u mycelium-core -u mycelium-tool-runner -f"

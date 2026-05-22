@@ -1,0 +1,5 @@
+package mycelium:mcp-demo@0.1.0;
+
+world mcp-demo {
+    export mycelium:mcp/mcp-provider@0.1.0;
+}

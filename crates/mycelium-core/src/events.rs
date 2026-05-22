@@ -114,8 +114,7 @@ async fn load_rules(kv: &Store) -> Result<Vec<RouterRule>> {
     Ok(out)
 }
 
-/// NATS subject pattern matcher. `*` = one segment, `>` = one or more
-/// segments at the tail. Same semantics as the wash router used.
+/// NATS subject pattern matcher. `*` = one segment, `>` = one or more tail segments.
 fn subject_matches(pattern: &str, subject: &str) -> bool {
     let p: Vec<&str> = pattern.split('.').collect();
     let s: Vec<&str> = subject.split('.').collect();

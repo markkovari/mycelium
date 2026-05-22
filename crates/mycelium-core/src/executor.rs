@@ -7,9 +7,8 @@
 //! between transitions, edits a single Telegram message in place to show
 //! progress (🤔 → 🔧 → 📊 → final).
 //!
-//! All the wash-fanout dedup machinery from the wasm version (claim_task
-//! marker-CAS, agent-claim reset, channel-router seen_update) is dropped —
-//! native single-instance per subject means single delivery per publish.
+//! Single-instance per subject means single delivery per publish; no dedup
+//! machinery needed.
 
 use std::sync::Arc;
 
@@ -740,11 +739,6 @@ async fn maybe_update_bot_status(
             .put("bot-status/last", now.to_string().into_bytes().into())
             .await;
     }
-}
-
-#[allow(dead_code)]
-fn now_iso() -> String {
-    chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true)
 }
 
 async fn emit_lifecycle(

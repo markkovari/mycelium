@@ -1,0 +1,25 @@
+[package]
+name              = "mcp-todo"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wit-bindgen = { workspace = true }
+serde_json  = { workspace = true }
+
+[package.metadata.component]
+package = "mycelium:mcp-todo"
+
+[package.metadata.component.target]
+path  = "wit"
+world = "mcp-todo"
+
+[package.metadata.component.target.dependencies]
+"mycelium:mcp"   = { path = "wit/deps/mycelium-mcp-0.1.0" }
+"wasi:keyvalue"  = { path = "wit/deps/wasi-keyvalue-0.2.0-draft" }
+"wasi:clocks"    = { path = "wit/deps/wasi-clocks-0.2.2" }
+"wasi:io"        = { path = "wit/deps/wasi-io-0.2.2" }
