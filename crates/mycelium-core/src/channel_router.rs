@@ -22,6 +22,7 @@ use tokio::sync::broadcast;
 use crate::{
     agent_registry::AgentRegistry,
     conversation_store::ConversationStore,
+    session::SessionStore,
     state::AppState,
     telegram::TgClient,
 };
@@ -35,6 +36,7 @@ pub async fn run(
     state: AppState,
     registry: AgentRegistry,
     convs: ConversationStore,
+    sessions: SessionStore,
     mut shutdown: broadcast::Receiver<()>,
 ) -> Result<()> {
     let pending = state
@@ -47,6 +49,7 @@ pub async fn run(
         state: state.clone(),
         registry,
         convs,
+        sessions,
         pending,
         telegram: if state.config.telegram_bot_token.is_empty() {
             None
@@ -89,6 +92,7 @@ struct RouterCtx {
     state: AppState,
     registry: AgentRegistry,
     convs: ConversationStore,
+    sessions: SessionStore,
     pending: Store,
     telegram: Option<TgClient>,
 }
@@ -100,6 +104,7 @@ struct CanonicalMessage<'a> {
     sender_id: String,
     text: &'a str,
     raw_json: &'a str,
+    session_id: String,
 }
 
 async fn handle_telegram_raw(ctx: &RouterCtx, body: &[u8]) -> Result<()> {
@@ -128,23 +133,9 @@ async fn handle_telegram_raw(ctx: &RouterCtx, body: &[u8]) -> Result<()> {
         return Ok(());
     }
 
-    // Always emit the canonical normalised message — useful for other channel
-    // adapters (web, slack) once they exist.
-    let raw_json = update.to_string();
-    let canonical = CanonicalMessage {
-        channel: "telegram",
-        channel_msg_id: message_id.clone(),
-        sender_id: chat_id.clone(),
-        text,
-        raw_json: &raw_json,
-    };
-    let bytes = serde_json::to_vec(&canonical)?;
-    ctx.state
-        .nats
-        .publish(CHANNEL_IN.to_string(), bytes.into())
-        .await?;
-
     if text.is_empty() {
+        // Still emit canonical for other adapters even if no agent loop runs.
+        emit_canonical(ctx, "telegram", &message_id, &chat_id, text, &update.to_string(), "").await?;
         return Ok(());
     }
 
@@ -152,6 +143,22 @@ async fn handle_telegram_raw(ctx: &RouterCtx, body: &[u8]) -> Result<()> {
         tracing::warn!("no agent registered; create one with /agent create");
         return Ok(());
     };
+
+    // Attach (or open) the session for this telegram chat + agent.
+    let session = ctx.sessions.attach("telegram", &chat_id, &agent_id).await?;
+    ctx.sessions.touch(&session.id).await.ok();
+
+    let raw_json = update.to_string();
+    emit_canonical(
+        ctx,
+        "telegram",
+        &message_id,
+        &chat_id,
+        text,
+        &raw_json,
+        &session.id,
+    )
+    .await?;
 
     if let Some(tg) = &ctx.telegram {
         // Best-effort typing indicator.
@@ -167,6 +174,10 @@ async fn handle_telegram_raw(ctx: &RouterCtx, body: &[u8]) -> Result<()> {
             conv.id
         }
     };
+    ctx.sessions
+        .attach_conversation(&session.id, &conv_id)
+        .await
+        .ok();
 
     ctx.convs
         .append_message(&conv_id, MessageRole::User, text.to_string(), None)
@@ -180,12 +191,38 @@ async fn handle_telegram_raw(ctx: &RouterCtx, body: &[u8]) -> Result<()> {
         "agent_id": agent_id,
         "input": text,
         "created_at": now_iso(),
+        "session_id": session.id,
     });
     save_pending_full(&ctx.pending, &task_id, "telegram", &chat_id, &conv_id, &message_id).await?;
     let task_bytes = serde_json::to_vec(&task)?;
     ctx.state
         .nats
         .publish(TASK_SUBMIT.to_string(), task_bytes.into())
+        .await?;
+    Ok(())
+}
+
+async fn emit_canonical(
+    ctx: &RouterCtx,
+    channel: &str,
+    channel_msg_id: &str,
+    sender_id: &str,
+    text: &str,
+    raw_json: &str,
+    session_id: &str,
+) -> Result<()> {
+    let canonical = CanonicalMessage {
+        channel,
+        channel_msg_id: channel_msg_id.to_string(),
+        sender_id: sender_id.to_string(),
+        text,
+        raw_json,
+        session_id: session_id.to_string(),
+    };
+    let bytes = serde_json::to_vec(&canonical)?;
+    ctx.state
+        .nats
+        .publish(CHANNEL_IN.to_string(), bytes.into())
         .await?;
     Ok(())
 }

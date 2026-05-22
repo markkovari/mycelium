@@ -57,6 +57,7 @@ create_kv mycelium-channel-pending
 create_kv mycelium-tools
 create_kv mycelium-skills          # tool-runner: skill manifests
 create_kv mycelium-skill-policy    # tool-runner: per-operator allow-list overrides
+create_kv mycelium-sessions        # mycelium-core: cross-task session records
 
 echo ""
 echo "Seeding default tool schemas (mycelium-tools KV)..."

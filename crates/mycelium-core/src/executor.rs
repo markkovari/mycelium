@@ -131,6 +131,8 @@ struct TaskJson {
     agent_id: String,
     input: String,
     created_at: String,
+    #[serde(default)]
+    session_id: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

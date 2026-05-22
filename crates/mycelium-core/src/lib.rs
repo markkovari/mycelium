@@ -19,6 +19,7 @@ pub mod events;
 pub mod executor;
 pub mod gateway;
 pub mod memory_store;
+pub mod session;
 pub mod state;
 pub mod telegram;
 pub mod telegram_out;
