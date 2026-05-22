@@ -21,7 +21,8 @@ use serde_json::{json, Value};
 use tokio::sync::broadcast;
 
 use crate::{
-    agent_registry::AgentRegistry, conversation_store::ConversationStore, hooks, state::AppState,
+    agent_registry::AgentRegistry, compaction, conversation_store::ConversationStore, hooks,
+    state::AppState,
 };
 
 const STEP_AGENT: &str = "mycelium.task.step.agent";
@@ -129,6 +130,7 @@ async fn handle_step(
         .and_then(|s| s.api_key.clone())
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| state.config.llm_api_key.clone());
+    let stored_for_compact = stored.clone();
     let tool_names: Vec<String> = stored.map(|s| s.tools).unwrap_or_default();
 
     // before-prompt-build hook: operator can inject extra context or block
@@ -164,10 +166,33 @@ async fn handle_step(
         .unwrap_or(&system_prompt)
         .to_string();
 
-    // Build the messages array: system + full history.
+    // Build the messages array: system + (possibly compacted) full history.
     let mut messages: Vec<Value> = vec![json!({"role": "system", "content": system_prompt})];
     match convs.get_messages(&req.conversation_id).await {
         Ok(history) => {
+            let compaction_threshold = stored_for_compact
+                .as_ref()
+                .and_then(|s| s.compaction_threshold)
+                .map(|n| n as usize)
+                .filter(|&n| n > 0)
+                .unwrap_or(compaction::DEFAULT_MSG_THRESHOLD);
+            let summary_model = stored_for_compact
+                .as_ref()
+                .and_then(|s| s.compaction_model.clone())
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| model.clone());
+            let history = compaction::maybe_compact(
+                state,
+                convs,
+                &req.conversation_id,
+                &req.agent_id,
+                history,
+                compaction_threshold,
+                &summary_model,
+                &api_key,
+                &endpoint,
+            )
+            .await;
             for m in history {
                 let role = match m.role {
                     MessageRole::System => "system",

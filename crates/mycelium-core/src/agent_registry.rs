@@ -29,6 +29,14 @@ pub struct StoredAgentConfig {
     pub endpoint: Option<String>,
     #[serde(default)]
     pub api_key: Option<String>,
+    /// Trigger compaction when message count exceeds this. Zero or
+    /// `None` falls back to the global default. Per-agent only.
+    #[serde(default)]
+    pub compaction_threshold: Option<u32>,
+    /// Optional cheaper model used for summarisation. Falls back to the
+    /// agent's main `model` when unset.
+    #[serde(default)]
+    pub compaction_model: Option<String>,
 }
 
 impl From<&AgentConfig> for StoredAgentConfig {
@@ -42,6 +50,8 @@ impl From<&AgentConfig> for StoredAgentConfig {
             max_steps: c.max_steps,
             endpoint: None,
             api_key: None,
+            compaction_threshold: None,
+            compaction_model: None,
         }
     }
 }

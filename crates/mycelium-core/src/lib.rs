@@ -13,6 +13,7 @@
 pub mod agent;
 pub mod agent_registry;
 pub mod channel_router;
+pub mod compaction;
 pub mod config;
 pub mod conversation_store;
 pub mod events;

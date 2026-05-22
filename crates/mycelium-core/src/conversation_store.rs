@@ -163,6 +163,44 @@ impl ConversationStore {
         Ok(out)
     }
 
+    /// Atomically replace the entire message history for `conversation_id`
+    /// with `messages`, preserving each entry's original `id` + `created_at`.
+    /// Used by the compaction pass: the new sequence is
+    /// `[summary_msg, …recent_tail]`.
+    pub async fn replace_history(
+        &self,
+        conversation_id: &str,
+        messages: &[Message],
+    ) -> Result<()> {
+        let prefix = format!("msg/{conversation_id}/");
+        let mut keys_stream = self.msgs.keys().await?;
+        let mut existing: Vec<String> = Vec::new();
+        while let Some(key) = keys_stream.next().await {
+            let key = key?;
+            if key.starts_with(&prefix) {
+                existing.push(key);
+            }
+        }
+        for key in existing {
+            self.msgs.delete(&key).await.ok();
+        }
+        for (idx, m) in messages.iter().enumerate() {
+            let stamp = chrono::Utc::now()
+                .timestamp_nanos_opt()
+                .unwrap_or_else(|| chrono::Utc::now().timestamp() * 1_000_000_000)
+                as u64
+                + idx as u64;
+            let json = serde_json::to_vec(&MsgJson::from(m))?;
+            self.msgs
+                .put(
+                    format!("msg/{conversation_id}/{stamp:020}_{}", m.id),
+                    json.into(),
+                )
+                .await?;
+        }
+        Ok(())
+    }
+
     pub async fn get_messages_after(
         &self,
         conversation_id: &str,
