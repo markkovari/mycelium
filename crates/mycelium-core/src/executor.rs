@@ -68,6 +68,7 @@ pub async fn run(
     let mut sub_tool_result = state.nats.subscribe(TOOL_RESULT.to_string()).await?;
     let mut sub_step_result = state.nats.subscribe(STEP_RESULT.to_string()).await?;
 
+    reconcile_stale_tasks(&ctx).await;
     tracing::info!("executor started");
 
     loop {
@@ -202,6 +203,42 @@ async fn load_pending(kv: &Store, task_id: &str) -> Result<Option<PendingTask>> 
 async fn delete_pending(kv: &Store, task_id: &str) -> Result<()> {
     kv.delete(task_id).await.ok();
     Ok(())
+}
+
+// ─────────────────────────── startup reconciliation ─────────────────────────
+
+async fn reconcile_stale_tasks(ctx: &ExecCtx) {
+    let Ok(mut keys) = ctx.state_kv.keys().await else { return };
+    let mut count = 0u32;
+    while let Some(key) = keys.next().await {
+        let Ok(key) = key else { continue };
+        let Ok(Some(mut state)) = load_state(&ctx.state_kv, key.trim_start_matches("task/")).await
+        else {
+            continue
+        };
+        if state.status != "running" && state.status != "waiting_tools" {
+            continue;
+        }
+        state.status = "failed".into();
+        state.error = Some("executor restarted".into());
+        if let Err(e) = save_state(&ctx.state_kv, &state).await {
+            tracing::warn!(task = %state.task.id, error = %e, "reconcile: save failed");
+            continue;
+        }
+        // Edit the "thinking…" Telegram message to show failure.
+        if state.progress_message_id != 0 && !state.chat_id.is_empty() {
+            if let Some(tg) = &ctx.telegram {
+                tg.edit_message_text(&state.chat_id, state.progress_message_id, "⚠️ interrupted (service restarted)")
+                    .await
+                    .ok();
+            }
+        }
+        delete_pending(&ctx.pending_kv, &state.task.id).await.ok();
+        count += 1;
+    }
+    if count > 0 {
+        tracing::info!(count, "reconciled stale running tasks");
+    }
 }
 
 // ─────────────────────────── handler arms ───────────────────────────
