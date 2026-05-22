@@ -365,6 +365,7 @@ async fn try_slash_command(ctx: &RouterCtx, chat_id: &str, text: &str) -> Result
                 /agent show <id> — show agent config\n\
                 /agent set-prompt <id> <prompt> — update system prompt\n\
                 /agent set-model <id> <model> — update model\n\
+                /agent set-tools <id> all|tool1,tool2,... — set tool list (all=every tool)\n\
                 /agent delete <id> — remove agent\n\
                 /reset — clear conversation history\n\
                 /memory — show last 10 messages\n\
@@ -485,6 +486,26 @@ async fn try_slash_command(ctx: &RouterCtx, chat_id: &str, text: &str) -> Result
                     } else {
                         match ctx.registry.delete(id).await {
                             Ok(_) => { tg.send_message(chat_id, &format!("agent {id} deleted")).await.ok(); }
+                            Err(e) => { tg.send_message(chat_id, &format!("error: {e}")).await.ok(); }
+                        }
+                    }
+                    Ok(true)
+                }
+                "set-tools" => {
+                    let mut parts = args.splitn(2, ' ');
+                    let id = parts.next().unwrap_or("").trim();
+                    let tools_arg = parts.next().unwrap_or("").trim();
+                    if id.is_empty() || tools_arg.is_empty() {
+                        tg.send_message(chat_id, "usage: /agent set-tools <id> all|tool1,tool2,...").await.ok();
+                    } else {
+                        let tools: Vec<String> = if tools_arg == "all" {
+                            Vec::new()
+                        } else {
+                            tools_arg.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
+                        };
+                        let label = if tools.is_empty() { "all".to_string() } else { tools.join(", ") };
+                        match ctx.registry.set_tools(id, tools).await {
+                            Ok(_) => { tg.send_message(chat_id, &format!("{id} tools → {label}")).await.ok(); }
                             Err(e) => { tg.send_message(chat_id, &format!("error: {e}")).await.ok(); }
                         }
                     }
