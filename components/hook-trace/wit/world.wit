@@ -1,0 +1,7 @@
+package mycelium:hook-trace@0.1.0;
+
+world hook-trace {
+    export mycelium:hook/hook-provider@0.1.0;
+
+    import wasi:logging/logging@0.1.0-draft;
+}

@@ -8,7 +8,7 @@ image_tag    := env_var_or_default("IMAGE_TAG", "dev")
 http_addr    := env_var_or_default("HTTP_ADDR", "0.0.0.0:8080")
 
 # Only the sandboxed skill components remain as wasm. Pipeline is native.
-components := "tool-time tool-calc tool-web-fetch"
+components := "tool-time tool-calc tool-web-fetch hook-trace"
 native_bins := "mycelium-core mycelium-tool-runner"
 
 default:
@@ -166,7 +166,7 @@ init-wit-deps: fetch-wit-deps
         if [ -d "wit/deps" ]; then
             cp -r wit/deps/. "$dest/"
         fi
-        for pkg in types agent conversation tool memory executor router channel pairing cron batch task; do
+        for pkg in types agent conversation tool memory executor router channel pairing cron batch task hook; do
             mkdir -p "$dest/mycelium-${pkg}-0.1.0"
             cp "wit/${pkg}.wit" "$dest/mycelium-${pkg}-0.1.0/"
         done

@@ -5,6 +5,7 @@ members = [
     "components/tool-time",
     "components/tool-calc",
     "components/tool-web-fetch",
+    "components/hook-trace",
     # Native pipeline + tool runner + shared crates.
     "crates/mycelium-core",
     "crates/mycelium-tool-runner",

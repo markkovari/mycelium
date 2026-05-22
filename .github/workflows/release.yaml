@@ -32,6 +32,7 @@ jobs:
           - { dir: tool-time,      file: tool_time }
           - { dir: tool-calc,      file: tool_calc }
           - { dir: tool-web-fetch, file: tool_web_fetch }
+          - { dir: hook-trace,     file: hook_trace }
 
     steps:
       - uses: actions/checkout@v4
