@@ -509,28 +509,65 @@ async fn list_registered_tools(state: &AppState) -> String {
     let Ok(mut keys) = kv.keys().await else {
         return "skill registry list failed.".to_string();
     };
-    let mut out = String::from("registered skills:\n");
-    let mut had_any = false;
+
+    // Collect all tool entries, bucket by mcp_server (None = standalone skill).
+    let mut by_server: std::collections::BTreeMap<Option<String>, Vec<(String, String)>> =
+        std::collections::BTreeMap::new();
     while let Some(key) = keys.next().await {
         let Ok(key) = key else { continue };
-        had_any = true;
-        let desc = kv
+        let entry = kv
             .get(&key)
             .await
             .ok()
             .flatten()
-            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
-            .and_then(|v| v.get("description").and_then(|d| d.as_str()).map(str::to_string))
-            .unwrap_or_default();
-        if desc.is_empty() {
-            out.push_str(&format!("- {key}\n"));
-        } else {
-            out.push_str(&format!("- {key} — {desc}\n"));
+            .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+            .unwrap_or(Value::Null);
+        let desc = entry
+            .get("description")
+            .and_then(|d| d.as_str())
+            .unwrap_or("")
+            .to_string();
+        let server = entry
+            .get("mcp_server")
+            .and_then(|s| s.as_str())
+            .map(str::to_string);
+        by_server.entry(server).or_default().push((key, desc));
+    }
+
+    if by_server.is_empty() {
+        return "no skills or MCP servers registered.".to_string();
+    }
+
+    let mut out = String::new();
+
+    // Standalone skills first.
+    if let Some(skills) = by_server.get(&None) {
+        out.push_str("skills:\n");
+        for (name, desc) in skills {
+            if desc.is_empty() {
+                out.push_str(&format!("- {name}\n"));
+            } else {
+                out.push_str(&format!("- {name} — {desc}\n"));
+            }
         }
     }
-    if !had_any {
-        return "no skills registered.".to_string();
+
+    // MCP servers grouped.
+    for (server_opt, tools) in &by_server {
+        let Some(server) = server_opt else { continue };
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(&format!("MCP server: {server}\n"));
+        for (name, desc) in tools {
+            if desc.is_empty() {
+                out.push_str(&format!("  - {name}\n"));
+            } else {
+                out.push_str(&format!("  - {name} — {desc}\n"));
+            }
+        }
     }
+
     out
 }
 
