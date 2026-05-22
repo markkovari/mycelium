@@ -22,6 +22,7 @@ use tokio::sync::broadcast;
 use crate::{
     agent_registry::AgentRegistry,
     conversation_store::ConversationStore,
+    hooks,
     session::SessionStore,
     state::AppState,
     telegram::TgClient,
@@ -133,6 +134,31 @@ async fn handle_telegram_raw(ctx: &RouterCtx, body: &[u8]) -> Result<()> {
         return Ok(());
     }
 
+    // message-received hook: operator gets first look at the inbound text.
+    // `{block: true}` short-circuits the rest of the flow (silent ignore).
+    let recv_outcome = hooks::fire(
+        &ctx.state.nats,
+        "message-received",
+        json!({
+            "channel": "telegram",
+            "channel_msg_id": message_id,
+            "sender_id": chat_id,
+            "text": text,
+        }),
+    )
+    .await;
+    if recv_outcome.block {
+        tracing::info!(reason = ?recv_outcome.reason, "message-received hook blocked inbound");
+        return Ok(());
+    }
+    let text_owned = recv_outcome
+        .payload
+        .get("text")
+        .and_then(|v| v.as_str())
+        .unwrap_or(text)
+        .to_string();
+    let text: &str = &text_owned;
+
     if text.is_empty() {
         // Still emit canonical for other adapters even if no agent loop runs.
         emit_canonical(ctx, "telegram", &message_id, &chat_id, text, &update.to_string(), "").await?;
@@ -144,8 +170,23 @@ async fn handle_telegram_raw(ctx: &RouterCtx, body: &[u8]) -> Result<()> {
         return Ok(());
     };
 
-    // Attach (or open) the session for this telegram chat + agent.
+    // Attach (or open) the session for this telegram chat + agent. Fire
+    // session-start only when this is a freshly opened session.
+    let was_new = ctx.sessions.active_for("telegram", &chat_id).await?.is_none();
     let session = ctx.sessions.attach("telegram", &chat_id, &agent_id).await?;
+    if was_new {
+        let _ = hooks::fire(
+            &ctx.state.nats,
+            "session-start",
+            json!({
+                "session_id": session.id,
+                "channel": "telegram",
+                "channel_session_key": chat_id,
+                "agent_id": agent_id,
+            }),
+        )
+        .await;
+    }
     ctx.sessions.touch(&session.id).await.ok();
 
     let raw_json = update.to_string();

@@ -1,8 +1,8 @@
 use anyhow::Result;
 use mycelium_core::{
     agent, agent_registry::AgentRegistry, channel_router, config::Config,
-    conversation_store::ConversationStore, events, executor, gateway, session::SessionStore,
-    state::AppState, telegram_out, telegram_poller,
+    conversation_store::ConversationStore, events, executor, gateway, hooks,
+    session::SessionStore, state::AppState, telegram_out, telegram_poller,
 };
 use tokio::sync::broadcast;
 use tokio::task::JoinSet;
@@ -66,7 +66,7 @@ async fn main() -> Result<()> {
     );
     spawn_module!(
         "session_sweeper",
-        session_sweeper(sessions.clone(), shutdown_tx.subscribe())
+        session_sweeper(sessions.clone(), state.clone(), shutdown_tx.subscribe())
     );
     spawn_module!(
         "executor",
@@ -124,6 +124,7 @@ async fn main() -> Result<()> {
 
 async fn session_sweeper(
     sessions: SessionStore,
+    state: AppState,
     mut shutdown: tokio::sync::broadcast::Receiver<()>,
 ) -> Result<()> {
     let mut tick = tokio::time::interval(std::time::Duration::from_secs(5 * 60));
@@ -135,6 +136,14 @@ async fn session_sweeper(
                 match sessions.sweep_idle().await {
                     Ok(closed) if !closed.is_empty() => {
                         tracing::info!(count = closed.len(), "closed idle sessions");
+                        for sid in &closed {
+                            let _ = hooks::fire(
+                                &state.nats,
+                                "session-end",
+                                serde_json::json!({"session_id": sid, "reason": "idle-timeout"}),
+                            )
+                            .await;
+                        }
                     }
                     Ok(_) => {}
                     Err(e) => tracing::warn!(error = %e, "session sweep failed"),

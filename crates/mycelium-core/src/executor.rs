@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::sync::broadcast;
 
-use crate::{conversation_store::ConversationStore, state::AppState, telegram::TgClient};
+use crate::{conversation_store::ConversationStore, hooks, state::AppState, telegram::TgClient};
 
 const STATE_BUCKET: &str = "mycelium-task-state";
 const PENDING_BUCKET: &str = "mycelium-channel-pending";
@@ -331,10 +331,44 @@ async fn handle_step_tool_calls(ctx: &ExecCtx, body: &[u8]) -> Result<()> {
     save_state(&ctx.state_kv, &state).await?;
 
     for c in &calls {
+        // before-tool-call hook: operator can mutate arguments or block.
+        let btc = hooks::fire(
+            &ctx.state.nats,
+            "before-tool-call",
+            json!({
+                "task_id": task_id,
+                "run_id": state.run_id,
+                "call_id": c.id,
+                "tool": c.name,
+                "arguments": c.arguments,
+            }),
+        )
+        .await;
+        if btc.block {
+            // Synthesize a tool result that surfaces the block to the agent.
+            let err_payload = json!({
+                "task_id": task_id,
+                "call_id": c.id,
+                "tool_id": c.name,
+                "output": Value::Null,
+                "error": format!("blocked by before-tool-call hook: {}", btc.reason.clone().unwrap_or_default()),
+            });
+            ctx.state
+                .nats
+                .publish(TOOL_RESULT.to_string(), serde_json::to_vec(&err_payload)?.into())
+                .await?;
+            continue;
+        }
+        let arguments = btc
+            .payload
+            .get("arguments")
+            .and_then(|v| v.as_str())
+            .unwrap_or(&c.arguments)
+            .to_string();
         let payload = json!({
             "task_id": task_id,
             "call_id": c.id,
-            "arguments": c.arguments,
+            "arguments": arguments,
             "run_id": state.run_id,
         });
         ctx.state
@@ -378,6 +412,32 @@ async fn handle_tool_result(ctx: &ExecCtx, body: &[u8]) -> Result<()> {
         .unwrap_or_else(|| "unknown".to_string());
     let output = req.get("output").and_then(|v| v.as_str()).map(str::to_string);
     let error = req.get("error").and_then(|v| v.as_str()).map(str::to_string);
+    // after-tool-call hook: observer + optional output mutation.
+    let atc = hooks::fire(
+        &ctx.state.nats,
+        "after-tool-call",
+        json!({
+            "task_id": task_id,
+            "run_id": state.run_id,
+            "call_id": call_id,
+            "tool": name,
+            "output": output,
+            "error": error,
+        }),
+    )
+    .await;
+    let output = atc
+        .payload
+        .get("output")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .or(output);
+    let error = atc
+        .payload
+        .get("error")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .or(error);
     state.tool_results.push(ToolResultRec {
         id: call_id,
         name: name.clone(),
@@ -437,11 +497,28 @@ async fn handle_tool_result(ctx: &ExecCtx, body: &[u8]) -> Result<()> {
     if let Some(pending) = load_pending(&ctx.pending_kv, &task_id).await? {
         if !pending.conversation_id.is_empty() {
             for r in &state.tool_results {
-                let content = match (&r.output, &r.error) {
+                let mut content = match (&r.output, &r.error) {
                     (Some(o), _) => format!("[tool {} returned: {o}]", r.name),
                     (_, Some(e)) => format!("[tool {} failed: {e}]", r.name),
                     _ => format!("[tool {} returned: <empty>]", r.name),
                 };
+                // tool-result-persist hook: mutate the synthetic message
+                // before it joins conversation history.
+                let trp = hooks::fire(
+                    &ctx.state.nats,
+                    "tool-result-persist",
+                    json!({
+                        "task_id": task_id,
+                        "run_id": state.run_id,
+                        "tool": r.name,
+                        "call_id": r.id,
+                        "content": content,
+                    }),
+                )
+                .await;
+                if let Some(s) = trp.payload.get("content").and_then(|v| v.as_str()) {
+                    content = s.to_string();
+                }
                 let _ = ctx
                     .convs
                     .append_message(

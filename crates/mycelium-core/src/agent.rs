@@ -21,7 +21,7 @@ use serde_json::{json, Value};
 use tokio::sync::broadcast;
 
 use crate::{
-    agent_registry::AgentRegistry, conversation_store::ConversationStore, state::AppState,
+    agent_registry::AgentRegistry, conversation_store::ConversationStore, hooks, state::AppState,
 };
 
 const STEP_AGENT: &str = "mycelium.task.step.agent";
@@ -131,6 +131,39 @@ async fn handle_step(
         .unwrap_or_else(|| state.config.llm_api_key.clone());
     let tool_names: Vec<String> = stored.map(|s| s.tools).unwrap_or_default();
 
+    // before-prompt-build hook: operator can inject extra context or block
+    // the step entirely.
+    let pb_outcome = hooks::fire(
+        &state.nats,
+        "before-prompt-build",
+        json!({
+            "task_id": req.task_id,
+            "run_id": req.run_id,
+            "conversation_id": req.conversation_id,
+            "agent_id": req.agent_id,
+            "system_prompt": system_prompt,
+        }),
+    )
+    .await;
+    if pb_outcome.block {
+        return publish_result(
+            state,
+            &req.task_id,
+            None,
+            Some(format!(
+                "before-prompt-build blocked: {}",
+                pb_outcome.reason.unwrap_or_default()
+            )),
+        )
+        .await;
+    }
+    let system_prompt = pb_outcome
+        .payload
+        .get("system_prompt")
+        .and_then(|v| v.as_str())
+        .unwrap_or(&system_prompt)
+        .to_string();
+
     // Build the messages array: system + full history.
     let mut messages: Vec<Value> = vec![json!({"role": "system", "content": system_prompt})];
     match convs.get_messages(&req.conversation_id).await {
@@ -190,6 +223,33 @@ async fn handle_step(
 
     let tool_specs = load_tool_specs(tools_kv, &tool_names).await;
 
+    // before-agent-reply hook: last chance to mutate model/tools or claim
+    // the turn synthetically. A block here aborts the LLM call entirely.
+    let bar_outcome = hooks::fire(
+        &state.nats,
+        "before-agent-reply",
+        json!({
+            "task_id": req.task_id,
+            "run_id": req.run_id,
+            "agent_id": req.agent_id,
+            "model": model,
+            "tool_count": tool_specs.len(),
+        }),
+    )
+    .await;
+    if bar_outcome.block {
+        return publish_result(
+            state,
+            &req.task_id,
+            None,
+            Some(format!(
+                "before-agent-reply blocked: {}",
+                bar_outcome.reason.unwrap_or_default()
+            )),
+        )
+        .await;
+    }
+
     let stream_ctx: StreamCtxState = state_kv
         .get(format!("task/{}", req.task_id))
         .await
@@ -218,6 +278,17 @@ async fn handle_step(
     {
         Ok(LlmReply::Tools(calls)) => {
             note_circuit_success(state_kv).await;
+            let _ = hooks::fire(
+                &state.nats,
+                "agent-end",
+                json!({
+                    "task_id": req.task_id,
+                    "run_id": req.run_id,
+                    "kind": "tools",
+                    "call_count": calls.len(),
+                }),
+            )
+            .await;
             let payload = json!({
                 "task_id": req.task_id,
                 "conversation_id": req.conversation_id,
@@ -232,6 +303,17 @@ async fn handle_step(
         }
         Ok(LlmReply::Text(content)) => {
             note_circuit_success(state_kv).await;
+            let _ = hooks::fire(
+                &state.nats,
+                "agent-end",
+                json!({
+                    "task_id": req.task_id,
+                    "run_id": req.run_id,
+                    "kind": "text",
+                    "len": content.chars().count(),
+                }),
+            )
+            .await;
             publish_result(state, &req.task_id, Some(content), None).await
         }
         Err(e) => {

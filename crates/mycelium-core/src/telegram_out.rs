@@ -17,7 +17,7 @@ use futures_util::StreamExt;
 use serde::Deserialize;
 use tokio::sync::broadcast;
 
-use crate::{state::AppState, telegram::TgClient};
+use crate::{hooks, state::AppState, telegram::TgClient};
 
 const OUT_SUBJECT: &str = "mycelium.channel.telegram.out.>";
 const ACTION_SUBJECT: &str = "mycelium.channel.telegram.action.>";
@@ -95,7 +95,7 @@ pub async fn run(state: AppState, mut shutdown: broadcast::Receiver<()>) -> Resu
                 break;
             }
             Some(msg) = sub_out.next() => {
-                if let Err(e) = handle_out(&tg, &msg).await {
+                if let Err(e) = handle_out(&tg, &state.nats, &msg).await {
                     tracing::warn!(error = %e, "telegram_out send failed");
                 }
             }
@@ -114,9 +114,34 @@ pub async fn run(state: AppState, mut shutdown: broadcast::Receiver<()>) -> Resu
     Ok(())
 }
 
-async fn handle_out(tg: &TgClient, msg: &async_nats::Message) -> Result<()> {
+async fn handle_out(
+    tg: &TgClient,
+    nats: &async_nats::Client,
+    msg: &async_nats::Message,
+) -> Result<()> {
     let reply: ChannelReply = serde_json::from_slice(&msg.payload)?;
-    tg.send_message(&reply.recipient_id, &reply.text).await?;
+    // message-sending hook: operator can rewrite outbound text or block.
+    let ms = hooks::fire(
+        nats,
+        "message-sending",
+        serde_json::json!({
+            "channel": "telegram",
+            "recipient_id": reply.recipient_id,
+            "text": reply.text,
+        }),
+    )
+    .await;
+    if ms.block {
+        tracing::info!(reason = ?ms.reason, "message-sending hook blocked outbound");
+        return Ok(());
+    }
+    let text = ms
+        .payload
+        .get("text")
+        .and_then(|v| v.as_str())
+        .unwrap_or(&reply.text)
+        .to_string();
+    tg.send_message(&reply.recipient_id, &text).await?;
     Ok(())
 }
 
