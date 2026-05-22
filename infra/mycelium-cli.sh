@@ -434,7 +434,22 @@ Commands:
   budget set rpm=N|rpd=N
   budget reset                 (clear all rate/circuit counters)
   chat <agent-id> <text>
+  run watch <run-id>           tail lifecycle events for one agent run
 EOF
+}
+
+cmd_run() {
+    local sub="${1:-}"; shift || true
+    case "$sub" in
+        watch)
+            local run_id="${1:-}"
+            [ -z "$run_id" ] && die "usage: mycelium run watch <run-id>"
+            command -v nats >/dev/null 2>&1 || die "nats CLI required"
+            log "tailing mycelium.run.$run_id.> (Ctrl-C to stop)"
+            nats --server="$NATS_URL" sub "mycelium.run.$run_id.>" --raw
+            ;;
+        *) die "run subcommand: watch <run-id>" ;;
+    esac
 }
 
 main() {
@@ -452,6 +467,7 @@ main() {
         tool)         cmd_tool "$@" ;;
         budget)       cmd_budget "$@" ;;
         chat)         cmd_chat "$@" ;;
+        run)          cmd_run "$@" ;;
         config)
             local sub="${1:-}"; shift || true
             [ "$sub" = "show" ] && cmd_config_show || usage

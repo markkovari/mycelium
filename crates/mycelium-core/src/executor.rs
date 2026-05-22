@@ -17,7 +17,7 @@ use anyhow::{Context, Result};
 use async_nats::jetstream::kv::Store;
 use chrono::SecondsFormat;
 use futures_util::StreamExt;
-use mycelium_types::MessageRole;
+use mycelium_types::{LifecycleEvent, LifecyclePhase, MessageRole};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::sync::broadcast;
@@ -166,6 +166,8 @@ struct TaskState {
     chat_id: String,
     #[serde(default)]
     max_steps: u32,
+    #[serde(default)]
+    run_id: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -221,6 +223,7 @@ async fn handle_task_submit(ctx: &ExecCtx, body: &[u8]) -> Result<()> {
         _ => (String::new(), 0),
     };
 
+    let run_id = uuid::Uuid::now_v7().to_string();
     let state = TaskState {
         task: task.clone(),
         status: "running".into(),
@@ -232,18 +235,22 @@ async fn handle_task_submit(ctx: &ExecCtx, body: &[u8]) -> Result<()> {
         progress_message_id,
         chat_id,
         max_steps: 4,
+        run_id: run_id.clone(),
     };
     save_state(&ctx.state_kv, &state).await?;
+    emit_lifecycle(ctx, &run_id, &task.id, LifecyclePhase::Started, 0, None).await;
 
     let step = json!({
         "task_id": task.id,
         "conversation_id": task.conversation_id,
         "agent_id": task.agent_id,
+        "run_id": run_id,
     });
     ctx.state
         .nats
         .publish(STEP_AGENT.to_string(), serde_json::to_vec(&step)?.into())
         .await?;
+    emit_lifecycle(ctx, &run_id, &task.id, LifecyclePhase::Stepping, 1, None).await;
     Ok(())
 }
 
@@ -262,6 +269,15 @@ async fn handle_step_tool_calls(ctx: &ExecCtx, body: &[u8]) -> Result<()> {
         state.error = Some("max steps exceeded".into());
         save_state(&ctx.state_kv, &state).await?;
         progress_edit(ctx, &state, &format!("⚠️ max steps exceeded ({}/{max})", state.step)).await;
+        emit_lifecycle(
+            ctx,
+            &state.run_id,
+            &task_id,
+            LifecyclePhase::Error,
+            state.step,
+            Some("max steps exceeded".into()),
+        )
+        .await;
         let res = json!({
             "task_id": task_id,
             "output": Value::Null,
@@ -317,6 +333,7 @@ async fn handle_step_tool_calls(ctx: &ExecCtx, body: &[u8]) -> Result<()> {
             "task_id": task_id,
             "call_id": c.id,
             "arguments": c.arguments,
+            "run_id": state.run_id,
         });
         ctx.state
             .nats
@@ -326,6 +343,15 @@ async fn handle_step_tool_calls(ctx: &ExecCtx, body: &[u8]) -> Result<()> {
             )
             .await?;
     }
+    emit_lifecycle(
+        ctx,
+        &state.run_id,
+        &task_id,
+        LifecyclePhase::ToolCalls,
+        state.step,
+        None,
+    )
+    .await;
     Ok(())
 }
 
@@ -356,6 +382,15 @@ async fn handle_tool_result(ctx: &ExecCtx, body: &[u8]) -> Result<()> {
         output: output.clone(),
         error: error.clone(),
     });
+    emit_lifecycle(
+        ctx,
+        &state.run_id,
+        &task_id,
+        LifecyclePhase::ToolResult,
+        state.step,
+        error.clone(),
+    )
+    .await;
 
     let max = effective_max(&state);
     let preview = match (&output, &error) {
@@ -425,11 +460,21 @@ async fn handle_tool_result(ctx: &ExecCtx, body: &[u8]) -> Result<()> {
         "task_id": task_id,
         "conversation_id": state.task.conversation_id,
         "agent_id": state.task.agent_id,
+        "run_id": state.run_id,
     });
     ctx.state
         .nats
         .publish(STEP_AGENT.to_string(), serde_json::to_vec(&step)?.into())
         .await?;
+    emit_lifecycle(
+        ctx,
+        &state.run_id,
+        &task_id,
+        LifecyclePhase::Stepping,
+        state.step + 1,
+        None,
+    )
+    .await;
     Ok(())
 }
 
@@ -449,6 +494,8 @@ async fn handle_step_result(ctx: &ExecCtx, body: &[u8]) -> Result<()> {
         .filter(|s| !s.is_empty())
         .or_else(|| res.error.clone().map(|e| format!("(error: {e})")));
 
+    let mut run_id_for_event = String::new();
+    let mut step_for_event = 0u32;
     if let Some(mut state) = load_state(&ctx.state_kv, &res.task_id).await? {
         state.status = if res.error.is_some() {
             "failed".into()
@@ -457,7 +504,25 @@ async fn handle_step_result(ctx: &ExecCtx, body: &[u8]) -> Result<()> {
         };
         state.output = res.output.clone();
         state.error = res.error.clone();
+        run_id_for_event = state.run_id.clone();
+        step_for_event = state.step;
         save_state(&ctx.state_kv, &state).await?;
+    }
+    if !run_id_for_event.is_empty() {
+        let phase = if res.error.is_some() {
+            LifecyclePhase::Error
+        } else {
+            LifecyclePhase::Completed
+        };
+        emit_lifecycle(
+            ctx,
+            &run_id_for_event,
+            &res.task_id,
+            phase,
+            step_for_event,
+            res.error.clone(),
+        )
+        .await;
     }
 
     let Some(text) = reply_text else { return Ok(()) };
@@ -601,4 +666,34 @@ async fn maybe_update_bot_status(
 #[allow(dead_code)]
 fn now_iso() -> String {
     chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true)
+}
+
+async fn emit_lifecycle(
+    ctx: &ExecCtx,
+    run_id: &str,
+    task_id: &str,
+    phase: LifecyclePhase,
+    step: u32,
+    error: Option<String>,
+) {
+    if run_id.is_empty() {
+        return;
+    }
+    let event = LifecycleEvent {
+        run_id: run_id.to_string(),
+        task_id: task_id.to_string(),
+        phase,
+        step,
+        ts: chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true),
+        error,
+    };
+    let subject = format!("mycelium.run.{run_id}.lifecycle");
+    match serde_json::to_vec(&event) {
+        Ok(bytes) => {
+            if let Err(e) = ctx.state.nats.publish(subject, bytes.into()).await {
+                tracing::debug!(error = %e, "lifecycle publish failed (non-fatal)");
+            }
+        }
+        Err(e) => tracing::debug!(error = %e, "lifecycle serialize failed"),
+    }
 }

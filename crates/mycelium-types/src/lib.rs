@@ -5,11 +5,34 @@ use serde::{Deserialize, Serialize};
 
 pub type ConversationId = String;
 pub type TaskId = String;
+pub type RunId = String;
 pub type AgentId = String;
 pub type ToolId = String;
 pub type StepId = String;
 pub type MemoryKey = String;
 pub type Timestamp = String;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum LifecyclePhase {
+    Started,
+    Stepping,
+    ToolCalls,
+    ToolResult,
+    Completed,
+    Error,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LifecycleEvent {
+    pub run_id: RunId,
+    pub task_id: TaskId,
+    pub phase: LifecyclePhase,
+    pub step: u32,
+    pub ts: Timestamp,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]

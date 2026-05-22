@@ -40,6 +40,7 @@ create_stream MYCELIUM_CONVERSATIONS  "mycelium.conversation.>" file   720h
 create_stream MYCELIUM_EVENTS         "mycelium.event.>"        file   2160h
 create_stream MYCELIUM_CHANNELS       "mycelium.channel.>"      file   24h
 create_stream MYCELIUM_PAIRING        "mycelium.pair.>"         memory 10m
+create_stream MYCELIUM_RUNS           "mycelium.run.>"          memory 30m
 
 echo ""
 echo "==> Creating KV buckets"
