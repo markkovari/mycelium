@@ -239,6 +239,51 @@ async fn reconcile_stale_tasks(ctx: &ExecCtx) {
     if count > 0 {
         tracing::info!(count, "reconciled stale running tasks");
     }
+
+    // Second pass: delete orphaned pending entries (task missing or already
+    // terminal) that were never cleaned up, so stale "🤔 thinking…" messages
+    // don't linger in Telegram.
+    let Ok(mut pkeys) = ctx.pending_kv.keys().await else { return };
+    let mut orphans = 0u32;
+    while let Some(pkey) = pkeys.next().await {
+        let Ok(pkey) = pkey else { continue };
+        // Only UUID-shaped keys are task entries; skip seen/conv/bot-status/etc.
+        if !looks_like_task_id(&pkey) {
+            continue;
+        }
+        let terminal = match load_state(&ctx.state_kv, &pkey).await {
+            Ok(None) => true, // no task state at all
+            Ok(Some(ref s)) => s.status == "failed" || s.status == "done",
+            Err(_) => false,  // can't tell; leave it
+        };
+        if !terminal {
+            continue;
+        }
+        // Try to resolve chat_id + message_id from task state or pending entry.
+        let (chat_id, msg_id) = match load_state(&ctx.state_kv, &pkey).await {
+            Ok(Some(ref s)) if s.progress_message_id != 0 && !s.chat_id.is_empty() => {
+                (s.chat_id.clone(), s.progress_message_id)
+            }
+            _ => (String::new(), 0),
+        };
+        if msg_id != 0 {
+            if let Some(tg) = &ctx.telegram {
+                tg.edit_message_text(&chat_id, msg_id, "⚠️ interrupted (service restarted)")
+                    .await
+                    .ok();
+            }
+        }
+        delete_pending(&ctx.pending_kv, &pkey).await.ok();
+        orphans += 1;
+    }
+    if orphans > 0 {
+        tracing::info!(orphans, "cleaned orphaned pending entries");
+    }
+}
+
+fn looks_like_task_id(s: &str) -> bool {
+    // UUID v4/v7: 8-4-4-4-12 hex, total 36 chars with dashes
+    s.len() == 36 && s.chars().filter(|c| *c == '-').count() == 4
 }
 
 // ─────────────────────────── handler arms ───────────────────────────
@@ -681,7 +726,14 @@ async fn handle_step_result(ctx: &ExecCtx, body: &[u8]) -> Result<()> {
                 None => false,
             };
             if !edited {
-                let _ = tg.send_message_markdown(&pending.chat_id, &body).await;
+                if let Err(e) = tg.send_message_markdown(&pending.chat_id, &body).await {
+                    tracing::warn!(
+                        task = %res.task_id,
+                        chat_id = %pending.chat_id,
+                        error = %e,
+                        "failed to deliver step result to Telegram (edit+send both failed)"
+                    );
+                }
             }
             maybe_update_bot_status(ctx, tg, rpm_used, rpm_cap, rpd_used, rpd_cap).await;
         }
