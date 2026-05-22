@@ -362,6 +362,10 @@ async fn try_slash_command(ctx: &RouterCtx, chat_id: &str, text: &str) -> Result
                 /agents — list agents\n\
                 /agent set <id> — switch active agent for this chat\n\
                 /agent create <id> <model> <prompt> — register a new agent\n\
+                /agent show <id> — show agent config\n\
+                /agent set-prompt <id> <prompt> — update system prompt\n\
+                /agent set-model <id> <model> — update model\n\
+                /agent delete <id> — remove agent\n\
                 /reset — clear conversation history\n\
                 /memory — show last 10 messages\n\
                 /tools — list registered skills\n\
@@ -394,16 +398,95 @@ async fn try_slash_command(ctx: &RouterCtx, chat_id: &str, text: &str) -> Result
         }
         "/agent" => {
             let mut sub = rest.splitn(2, ' ');
-            match sub.next().unwrap_or("") {
+            let subcmd = sub.next().unwrap_or("").trim();
+            let args = sub.next().unwrap_or("").trim();
+            match subcmd {
                 "set" => {
-                    let id = sub.next().unwrap_or("").trim();
+                    let id = args;
                     if id.is_empty() {
                         tg.send_message(chat_id, "usage: /agent set <id>").await.ok();
                     } else {
                         save_chat_agent(&ctx.pending, chat_id, id).await?;
-                        tg.send_message(chat_id, &format!("default agent for this chat → {id}"))
+                        tg.send_message(chat_id, &format!("active agent → {id}"))
                             .await
                             .ok();
+                    }
+                    Ok(true)
+                }
+                "show" => {
+                    let id = args;
+                    if id.is_empty() {
+                        tg.send_message(chat_id, "usage: /agent show <id>").await.ok();
+                    } else {
+                        let body = match ctx.registry.get_stored(id).await {
+                            Ok(None) => format!("agent {id} not found"),
+                            Ok(Some(a)) => format!(
+                                "id: {}\nmodel: {}\nmax_steps: {}\ntools: {}\nprompt: {}",
+                                a.id,
+                                a.model,
+                                a.max_steps,
+                                if a.tools.is_empty() { "(all)".to_string() } else { a.tools.join(", ") },
+                                a.system_prompt,
+                            ),
+                            Err(e) => format!("error: {e}"),
+                        };
+                        tg.send_message(chat_id, &body).await.ok();
+                    }
+                    Ok(true)
+                }
+                "set-prompt" => {
+                    let mut parts = args.splitn(2, ' ');
+                    let id = parts.next().unwrap_or("").trim();
+                    let prompt = parts.next().unwrap_or("").trim();
+                    if id.is_empty() || prompt.is_empty() {
+                        tg.send_message(chat_id, "usage: /agent set-prompt <id> <new prompt>").await.ok();
+                    } else {
+                        match ctx.registry.get_stored(id).await {
+                            Ok(None) => { tg.send_message(chat_id, &format!("agent {id} not found")).await.ok(); }
+                            Ok(Some(mut stored)) => {
+                                stored.system_prompt = prompt.to_string();
+                                let cfg: mycelium_types::AgentConfig = stored.into();
+                                match ctx.registry.update(cfg).await {
+                                    Ok(_) => { tg.send_message(chat_id, &format!("{id} prompt updated")).await.ok(); }
+                                    Err(e) => { tg.send_message(chat_id, &format!("error: {e}")).await.ok(); }
+                                }
+                            }
+                            Err(e) => { tg.send_message(chat_id, &format!("error: {e}")).await.ok(); }
+                        }
+                    }
+                    Ok(true)
+                }
+                "set-model" => {
+                    let mut parts = args.splitn(2, ' ');
+                    let id = parts.next().unwrap_or("").trim();
+                    let model = parts.next().unwrap_or("").trim();
+                    if id.is_empty() || model.is_empty() {
+                        tg.send_message(chat_id, "usage: /agent set-model <id> <model>").await.ok();
+                    } else {
+                        match ctx.registry.get_stored(id).await {
+                            Ok(None) => { tg.send_message(chat_id, &format!("agent {id} not found")).await.ok(); }
+                            Ok(Some(mut stored)) => {
+                                stored.model = model.to_string();
+                                let cfg: mycelium_types::AgentConfig = stored.into();
+                                match ctx.registry.update(cfg).await {
+                                    Ok(_) => { tg.send_message(chat_id, &format!("{id} model → {model}")).await.ok(); }
+                                    Err(e) => { tg.send_message(chat_id, &format!("error: {e}")).await.ok(); }
+                                }
+                            }
+                            Err(e) => { tg.send_message(chat_id, &format!("error: {e}")).await.ok(); }
+                        }
+                    }
+                    Ok(true)
+                }
+                "delete" => {
+                    let id = args;
+                    if id.is_empty() {
+                        tg.send_message(chat_id, "usage: /agent delete <id>").await.ok();
+                    } else {
+                        match ctx.registry.delete(id).await {
+                            Ok(_) => { tg.send_message(chat_id, &format!("agent {id} deleted")).await.ok(); }
+                            Err(e) => { tg.send_message(chat_id, &format!("error: {e}")).await.ok(); }
+                        }
                     }
                     Ok(true)
                 }
@@ -411,7 +494,7 @@ async fn try_slash_command(ctx: &RouterCtx, chat_id: &str, text: &str) -> Result
                 _ => {
                     tg.send_message(
                         chat_id,
-                        "usage: /agent set <id> | /agent create <id> <model> <prompt>",
+                        "usage: /agent set|show|create|set-prompt|set-model|delete <id> [args]",
                     )
                     .await
                     .ok();
