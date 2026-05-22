@@ -160,8 +160,8 @@ systemctl --no-pager --lines 0 status \
 # Each entry: "<name> <capabilities-csv> <source-spec>"
 # source-spec is the JSON value for the "source" field in the install manifest.
 MCP_COMPONENTS=(
-  "mcp-todo wasi:keyvalue/store@0.2.0-draft,wasi:clocks/wall-clock nats-object:mycelium-components:mcp-todo.wasm"
-  "mcp-demo wasi:clocks/wall-clock nats-object:mycelium-components:mcp-demo.wasm"
+  "mcp-todo wasi:keyvalue/store@0.2.0-draft,wasi:clocks/wall-clock nats-object-store:mycelium-components:mcp-todo.wasm"
+  "mcp-demo wasi:clocks/wall-clock nats-object-store:mycelium-components:mcp-demo.wasm"
 )
 
 install_mcp_components() {
@@ -212,8 +212,16 @@ install_mcp_components() {
       || nats object put "$bucket" "$wasm_path" --name "$obj_key" 2>/dev/null \
       || { warn "  nats obj put failed for $name; skipping"; continue; }
 
+    # Compute sha256 for cache-key pinning (empty string = trust without verify).
+    local wasm_sha256=""
+    if command -v sha256sum >/dev/null; then
+      wasm_sha256=$(sha256sum "$wasm_path" | awk '{print $1}')
+    elif command -v shasum >/dev/null; then
+      wasm_sha256=$(shasum -a 256 "$wasm_path" | awk '{print $1}')
+    fi
+
     # Build source JSON.
-    local src_json="{\"type\":\"nats-object\",\"bucket\":\"$bucket\",\"key\":\"$obj_key\"}"
+    local src_json="{\"type\":\"nats-object-store\",\"bucket\":\"$bucket\",\"key\":\"$obj_key\",\"sha256\":\"$wasm_sha256\"}"
     # Build caps JSON array.
     local caps_json
     caps_json=$(echo "$caps" | tr ',' '\n' | jq -R . | jq -cs .)

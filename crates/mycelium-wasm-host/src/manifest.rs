@@ -58,6 +58,7 @@ pub enum ComponentSource {
     NatsObjectStore {
         bucket: String,
         key: String,
+        #[serde(default)]
         sha256: String,
     },
     File {
