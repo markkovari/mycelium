@@ -449,12 +449,37 @@ async fn note_circuit_success(kv: &Store) {
 // ─────────────────────────── tool specs ───────────────────────────
 
 async fn load_tool_specs(kv: &Store, wanted: &[String]) -> Vec<Value> {
+    // Empty list means "all registered tools".
     if wanted.is_empty() {
-        return Vec::new();
+        return load_all_tool_specs(kv).await;
     }
     let mut out = Vec::with_capacity(wanted.len());
     for name in wanted {
         let Ok(Some(bytes)) = kv.get(name).await else { continue };
+        let Ok(spec) = serde_json::from_slice::<Value>(&bytes) else { continue };
+        let description = spec.get("description").cloned().unwrap_or_else(|| json!(""));
+        let parameters = spec
+            .get("parameters")
+            .cloned()
+            .unwrap_or_else(|| json!({"type":"object"}));
+        out.push(json!({
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": description,
+                "parameters": parameters,
+            }
+        }));
+    }
+    out
+}
+
+async fn load_all_tool_specs(kv: &Store) -> Vec<Value> {
+    let Ok(mut keys) = kv.keys().await else { return Vec::new() };
+    let mut out = Vec::new();
+    while let Some(key) = keys.next().await {
+        let Ok(name) = key else { continue };
+        let Ok(Some(bytes)) = kv.get(&name).await else { continue };
         let Ok(spec) = serde_json::from_slice::<Value>(&bytes) else { continue };
         let description = spec.get("description").cloned().unwrap_or_else(|| json!(""));
         let parameters = spec
