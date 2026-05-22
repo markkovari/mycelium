@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 use tokio::sync::RwLock;
 
-use crate::manifest::SkillManifest;
+use crate::SkillManifest;
 
 const BUCKET: &str = "mycelium-skills";
 const CACHE_TTL: Duration = Duration::from_secs(30);

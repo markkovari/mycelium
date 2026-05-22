@@ -19,7 +19,7 @@ use wasmtime::{AsContextMut, Engine, Store, StoreLimitsBuilder};
 use wasmtime_wasi::{ResourceTable, WasiCtxBuilder};
 use wasmtime_wasi_http::{WasiHttpCtx, WasiHttpView};
 
-use crate::{config::Config, manifest::SkillManifest};
+use crate::{config::Config, SkillManifest};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ToolCallReq {

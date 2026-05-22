@@ -34,3 +34,4 @@ sha2               = { workspace = true }
 hex                = { workspace = true }
 mycelium-types     = { workspace = true }
 mycelium-tool-core = { workspace = true }
+mycelium-wasm-host = { workspace = true }

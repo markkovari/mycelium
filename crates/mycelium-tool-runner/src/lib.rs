@@ -12,7 +12,10 @@
 //! chain is the only place mycelium runs wasm anywhere.
 
 pub mod config;
-pub mod loader;
-pub mod manifest;
 pub mod registry;
 pub mod sandbox;
+
+pub use mycelium_wasm_host::{
+    loader::Loader, manifest::ComponentManifest as SkillManifest,
+    manifest::ComponentSource as SkillSource,
+};

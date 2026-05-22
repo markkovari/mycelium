@@ -13,6 +13,7 @@ members = [
     "crates/mycelium-tool-core",
     "crates/mycelium-cli",
     "crates/mycelium-tests",
+    "crates/mycelium-wasm-host",
 ]
 
 # `cargo build` (no -p) targets only the native crates. Skill components live
@@ -26,6 +27,7 @@ default-members = [
     "crates/mycelium-tool-core",
     "crates/mycelium-cli",
     "crates/mycelium-tests",
+    "crates/mycelium-wasm-host",
 ]
 
 [workspace.package]
@@ -52,6 +54,7 @@ rustyline           = "14"
 mycelium-types            = { path = "crates/mycelium-types" }
 mycelium-agent-core       = { path = "crates/mycelium-agent-core" }
 mycelium-tool-core        = { path = "crates/mycelium-tool-core" }
+mycelium-wasm-host        = { path = "crates/mycelium-wasm-host" }
 reqwest                   = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "gzip", "brotli", "stream"] }
 chrono                    = { version = "0.4", features = ["serde", "clock"] }
 thiserror                 = "2"
