@@ -247,6 +247,7 @@ async fn handle_step(
     }
 
     let tool_specs = load_tool_specs(tools_kv, &tool_names).await;
+    tracing::info!(task = %req.task_id, tools = tool_specs.len(), "loaded tool specs");
 
     // before-agent-reply hook: last chance to mutate model/tools or claim
     // the turn synthetically. A block here aborts the LLM call entirely.
@@ -621,8 +622,13 @@ async fn consume_sse_stream(
                 let Ok(parsed) = serde_json::from_str::<Value>(payload) else {
                     continue;
                 };
-                let Some(delta) = parsed.pointer("/choices/0/delta") else {
-                    continue;
+                // Prefer `delta` (OpenAI streaming); fall back to `message`
+                // (Gemini's OpenAI-compat layer sometimes sends full message).
+                let delta = match parsed.pointer("/choices/0/delta")
+                    .or_else(|| parsed.pointer("/choices/0/message"))
+                {
+                    Some(d) => d,
+                    None => continue,
                 };
                 if let Some(text) = delta.get("content").and_then(|v| v.as_str()) {
                     if !text.is_empty() {
@@ -683,6 +689,7 @@ async fn consume_sse_stream(
             let _ = nats.publish(subject, bytes.into()).await;
         }
     }
+    tracing::info!(task = %task_id, text_len = text_acc.len(), tool_calls = tool_acc.len(), "SSE stream done");
     if !tool_acc.is_empty() {
         let calls: Vec<ToolCall> = tool_acc
             .into_values()
