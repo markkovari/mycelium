@@ -1,0 +1,39 @@
+/// WIT world hook components are compiled against.
+///
+/// A hook exports `mycelium:hook/hook-provider.handle` (pure function call:
+/// event name + JSON payload in, possibly-mutated JSON payload out, or an
+/// error string). The runner is the only NATS speaker — hooks do not
+/// subscribe to anything.
+///
+/// Hooks MAY import any of the wasi:* interfaces listed below; the runner
+/// only adds an import to the wasmtime Linker when (a) the hook's manifest
+/// declared the capability AND (b) the operator approved that capability in
+/// the runner's allow-list. Unrequested imports cause an instantiate-time
+/// link error — deny-by-default for untrusted hook code, same posture as
+/// skill components.
+
+package mycelium:hook@0.1.0;
+
+interface hook-provider {
+    /// Returned payload is either the (possibly mutated) JSON payload to
+    /// thread to the next hook / consumer, or a short string explaining
+    /// why the hook failed. Hooks that want to block the originating
+    /// pipeline action (e.g. `before-tool-call`) return JSON
+    /// `{"block": true, "reason": "..."}`; the runner forwards that
+    /// verbatim and mycelium-core interprets the flag.
+    handle: func(event-name: string, payload-json: string) -> result<string, string>;
+}
+
+world hook {
+    export hook-provider;
+
+    import wasi:clocks/wall-clock@0.2.2;
+    import wasi:clocks/monotonic-clock@0.2.2;
+    import wasi:io/error@0.2.2;
+    import wasi:io/streams@0.2.2;
+    import wasi:io/poll@0.2.2;
+    import wasi:http/types@0.2.2;
+    import wasi:http/outgoing-handler@0.2.2;
+    import wasi:logging/logging@0.1.0-draft;
+    import wasi:random/random@0.2.2;
+}

@@ -1,0 +1,14 @@
+package mycelium:task@0.1.0;
+
+/// In-workload NATS bridge: a component that can't import wasmcloud:messaging/consumer
+/// (e.g. one exporting wasi:http/incoming-handler under wash host v2) calls this
+/// interface on a sibling component which holds the consumer import and publishes
+/// the task on subject `mycelium.task.submit`.
+interface task-submit {
+    use mycelium:types/types@0.1.0.{
+        task,
+        domain-error,
+    };
+
+    submit: func(task: task) -> result<_, domain-error>;
+}

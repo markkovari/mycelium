@@ -1,9 +1,9 @@
 /target
 /Cargo.lock
 
-# WIT deps fetched by wkg — seeded by `just init-wit-deps`
+# Top-level wit/deps fetched by wkg (not committed; use just init-wit-deps locally)
 wit/deps/
-components/*/wit/deps/
+# component wit/deps/ ARE committed so CI can build without wkg
 
 # Generated WIT bindings
 **/src/bindings.rs

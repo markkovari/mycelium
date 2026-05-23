@@ -1,0 +1,20 @@
+package mycelium:executor@0.1.0;
+
+interface orchestrator {
+    use mycelium:types/types@0.1.0.{
+        task,
+        task-id,
+        task-state,
+        domain-error,
+    };
+
+    submit: func(task: task) -> result<task-state, domain-error>;
+
+    get-state: func(id: task-id) -> result<task-state, domain-error>;
+
+    cancel: func(id: task-id) -> result<task-state, domain-error>;
+
+    list-for-conversation: func(
+        conversation-id: string,
+    ) -> result<list<task-state>, domain-error>;
+}

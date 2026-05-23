@@ -1,0 +1,7 @@
+package wasi:cli@0.2.2;
+
+/// Entry point for `wasi:cli/command`-style components. Exporting this lets the
+/// host invoke a long-running run() function as the component's main loop.
+interface run {
+    run: func() -> result;
+}

@@ -1,0 +1,39 @@
+package mycelium:conversation@0.1.0;
+
+interface conversations {
+    use mycelium:types/types@0.1.0.{
+        conversation-id,
+        agent-id,
+        conversation,
+        message,
+        message-role,
+        domain-error,
+    };
+
+    create: func(
+        agent-id: agent-id,
+        title:    option<string>,
+    ) -> result<conversation, domain-error>;
+
+    get: func(id: conversation-id) -> result<conversation, domain-error>;
+
+    list-conversations: func(agent-id: agent-id) -> result<list<conversation>, domain-error>;
+
+    delete: func(id: conversation-id) -> result<_, domain-error>;
+
+    append-message: func(
+        conversation-id: conversation-id,
+        role:            message-role,
+        content:         string,
+        tool-use-id:     option<string>,
+    ) -> result<message, domain-error>;
+
+    get-messages: func(
+        conversation-id: conversation-id,
+    ) -> result<list<message>, domain-error>;
+
+    get-messages-after: func(
+        conversation-id: conversation-id,
+        after-id:        string,
+    ) -> result<list<message>, domain-error>;
+}

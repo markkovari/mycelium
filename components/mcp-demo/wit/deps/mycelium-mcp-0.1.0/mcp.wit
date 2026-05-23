@@ -1,0 +1,18 @@
+package mycelium:mcp@0.1.0;
+
+interface mcp-provider {
+    record tool-def {
+        name: string,
+        description: string,
+        /// JSON Schema string (OpenAI function-calling `parameters` shape).
+        input-schema: string,
+    }
+
+    record mcp-result {
+        output-json: string,
+        is-error: bool,
+    }
+
+    list-tools: func() -> list<tool-def>;
+    call-tool: func(name: string, arguments-json: string) -> result<mcp-result, string>;
+}

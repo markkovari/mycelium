@@ -1,0 +1,16 @@
+package mycelium:batch@0.1.0;
+
+interface batch-queue {
+    record batch-job {
+        id:         string,
+        agent-id:   string,
+        prompt:     string,
+        context:    option<string>,
+        callback:   string,
+        created-at: string,
+    }
+
+    enqueue: func(job: batch-job) -> result<string, string>;
+    cancel:  func(id: string)     -> result<_, string>;
+    status:  func(id: string)     -> result<string, string>;
+}

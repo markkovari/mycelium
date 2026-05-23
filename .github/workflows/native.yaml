@@ -114,31 +114,8 @@ jobs:
         with:
           targets: wasm32-wasip1
 
-      - name: Install cargo-component + wkg
-        run: cargo install cargo-component wkg --locked
-
-      - name: Seed WIT deps
-        run: |
-          # Fetch external WASI packages into wit/deps/
-          tmpdir=$(mktemp -d)
-          mkdir -p "$tmpdir/deps"
-          cp wit/deps.toml "$tmpdir/deps.toml"
-          cp infra/fetch-world.wit "$tmpdir/world.wit"
-          wkg wit fetch -d "$tmpdir"
-          mkdir -p wit/deps
-          cp -r "$tmpdir/deps/." wit/deps/
-          # Overlay hand-maintained packages
-          [ -d wit/local-deps ] && cp -R wit/local-deps/. wit/deps/
-          # Seed each component's wit/deps/ from workspace
-          for comp in components/*/; do
-            dest="${comp}wit/deps"
-            mkdir -p "$dest"
-            cp -r wit/deps/. "$dest/"
-            for pkg in types agent conversation tool memory executor router channel pairing cron batch task hook mcp; do
-              mkdir -p "$dest/mycelium-${pkg}-0.1.0"
-              [ -f "wit/${pkg}.wit" ] && cp "wit/${pkg}.wit" "$dest/mycelium-${pkg}-0.1.0/"
-            done
-          done
+      - name: Install cargo-component
+        run: cargo install cargo-component --locked
 
       - name: Build ${{ matrix.component }}
         run: cargo component build --release -p ${{ matrix.component }}

@@ -1,0 +1,41 @@
+package mycelium:tool@0.1.0;
+
+interface tool-registry {
+    use mycelium:types/types@0.1.0.{
+        tool-id,
+        tool-call-request,
+        tool-call-result,
+        domain-error,
+    };
+
+    /// JSON Schema describing the tool's input parameters.
+    type tool-schema = string;
+
+    record tool-descriptor {
+        id:          tool-id,
+        name:        string,
+        description: string,
+        schema:      tool-schema,
+    }
+
+    list-tools: func() -> result<list<tool-descriptor>, domain-error>;
+
+    get-tool: func(id: tool-id) -> result<tool-descriptor, domain-error>;
+
+    execute: func(
+        call: tool-call-request,
+    ) -> result<tool-call-result, domain-error>;
+}
+
+interface tool-provider {
+    use mycelium:types/types@0.1.0.{
+        tool-call-request,
+        tool-call-result,
+        domain-error,
+    };
+
+    /// Provider-specific tool execution entry point.
+    invoke: func(
+        call: tool-call-request,
+    ) -> result<tool-call-result, domain-error>;
+}

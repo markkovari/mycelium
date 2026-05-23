@@ -1,0 +1,18 @@
+package wasi:config@0.2.0-rc.1;
+
+/// Runtime configuration store as exposed by the wash host v2 wasi:config plugin.
+/// Hand-maintained: the canonical 0.2.0-draft interface published to the WIT registry
+/// uses `runtime`, not `store`, so we ship our own copy of the rc.1 surface.
+interface store {
+    variant error {
+        upstream(string),
+        io(string),
+    }
+
+    get: func(key: string) -> result<option<string>, error>;
+    get-all: func() -> result<list<tuple<string, string>>, error>;
+}
+
+world imports {
+    import store;
+}

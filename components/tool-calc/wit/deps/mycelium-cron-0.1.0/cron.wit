@@ -1,0 +1,14 @@
+package mycelium:cron@0.1.0;
+
+interface scheduler {
+    record cron-job {
+        id:       string,
+        schedule: string,
+        subject:  string,
+        payload:  string,
+    }
+
+    register:   func(job: cron-job) -> result<string, string>;
+    unregister: func(id: string)    -> result<_, string>;
+    list-jobs:  func()              -> list<cron-job>;
+}

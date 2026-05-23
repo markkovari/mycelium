@@ -1,0 +1,47 @@
+package mycelium:channel@0.1.0;
+
+/// Normalise an incoming channel payload into a canonical message.
+/// Implemented by: telegram-gateway, lc-cli (native).
+interface inbound {
+    use mycelium:types/types@0.1.0.{
+        conversation-id,
+        agent-id,
+        domain-error,
+    };
+
+    record channel-message {
+        /// Unique ID assigned by the source channel (Telegram message_id, CLI seq, …)
+        channel-msg-id:  string,
+        /// Opaque sender within the channel (chat_id, user_id, tty)
+        sender-id:       string,
+        /// Existing conversation to continue; none = create new
+        conversation-id: option<conversation-id>,
+        /// Agent dispatch hint; resolved from config when absent
+        agent-id:        option<agent-id>,
+        text:            string,
+        /// Raw channel payload JSON for debugging / audit
+        raw-json:        string,
+    }
+
+    normalize: func(raw-json: string) -> result<channel-message, domain-error>;
+}
+
+/// Send a canonical reply back through a specific channel.
+/// Implemented by: telegram-gateway, lc-cli (native).
+interface outbound {
+    use mycelium:types/types@0.1.0.{
+        conversation-id,
+        domain-error,
+    };
+
+    record channel-reply {
+        /// Destination within the channel (chat_id, session_id, …)
+        recipient-id:    string,
+        conversation-id: conversation-id,
+        text:            string,
+        /// Channel-specific formatting hints (JSON: markdown mode, inline buttons, …)
+        format-hints:    option<string>,
+    }
+
+    send: func(reply: channel-reply) -> result<_, domain-error>;
+}

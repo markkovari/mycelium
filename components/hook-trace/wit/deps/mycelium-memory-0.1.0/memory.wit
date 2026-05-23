@@ -1,0 +1,36 @@
+package mycelium:memory@0.1.0;
+
+interface memory {
+    use mycelium:types/types@0.1.0.{
+        agent-id,
+        memory-key,
+        domain-error,
+    };
+
+    set: func(
+        agent-id:  agent-id,
+        key:       memory-key,
+        value:     string,
+        ttl-secs:  option<u64>,
+    ) -> result<_, domain-error>;
+
+    get: func(
+        agent-id: agent-id,
+        key:      memory-key,
+    ) -> result<option<string>, domain-error>;
+
+    delete: func(
+        agent-id: agent-id,
+        key:      memory-key,
+    ) -> result<_, domain-error>;
+
+    list-keys: func(
+        agent-id: agent-id,
+    ) -> result<list<memory-key>, domain-error>;
+
+    /// Bulk set — atomic where the backend supports it.
+    set-many: func(
+        agent-id: agent-id,
+        entries:  list<tuple<memory-key, string>>,
+    ) -> result<_, domain-error>;
+}
