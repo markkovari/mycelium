@@ -304,6 +304,25 @@ async fn handle_step(
     {
         Ok(LlmReply::Tools(calls)) => {
             note_circuit_success(state_kv).await;
+            // Intercept the pseudo "respond" tool — treat it as a plain text reply.
+            if calls.len() == 1 && calls[0].name == "respond" {
+                let text = serde_json::from_str::<serde_json::Value>(&calls[0].arguments)
+                    .ok()
+                    .and_then(|v| v.get("text").and_then(|t| t.as_str()).map(String::from))
+                    .unwrap_or_default();
+                let _ = hooks::fire(
+                    &state.nats,
+                    "agent-end",
+                    json!({
+                        "task_id": req.task_id,
+                        "run_id": req.run_id,
+                        "kind": "text",
+                        "len": text.chars().count(),
+                    }),
+                )
+                .await;
+                return publish_result(state, &req.task_id, Some(text), None).await;
+            }
             let _ = hooks::fire(
                 &state.nats,
                 "agent-end",
@@ -539,8 +558,27 @@ async fn call_llm_streaming(
             "stream": true,
         });
         if !tools.is_empty() {
-            body["tools"] = Value::Array(tools.to_vec());
-            body["tool_choice"] = json!("auto");
+            // Add a pseudo-tool the model can call to deliver a plain-text
+            // response when no real tool is needed. Using tool_choice="required"
+            // prevents the model from ignoring the tool list and refusing to act.
+            let respond_tool = json!({
+                "type": "function",
+                "function": {
+                    "name": "respond",
+                    "description": "Deliver a plain-text reply to the user when no other tool is needed.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "text": {"type": "string", "description": "The reply text"}
+                        },
+                        "required": ["text"]
+                    }
+                }
+            });
+            let mut all_tools = tools.to_vec();
+            all_tools.push(respond_tool);
+            body["tools"] = Value::Array(all_tools);
+            body["tool_choice"] = json!("required");
         }
         let mut req = http
             .post(endpoint)
