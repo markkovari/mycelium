@@ -302,14 +302,20 @@ async fn handle_step(
     )
     .await
     {
-        Ok(LlmReply::Tools(calls)) => {
+        Ok(LlmReply::Tools(mut calls)) => {
             note_circuit_success(state_kv).await;
-            // Intercept the pseudo "respond" tool — treat it as a plain text reply.
-            if calls.len() == 1 && calls[0].name == "respond" {
-                let text = serde_json::from_str::<serde_json::Value>(&calls[0].arguments)
-                    .ok()
-                    .and_then(|v| v.get("text").and_then(|t| t.as_str()).map(String::from))
-                    .unwrap_or_default();
+            // Extract any "respond" pseudo-tool call — models sometimes call it
+            // alongside real tools. Collect the text, strip respond from the batch.
+            let respond_text: Option<String> = calls
+                .iter()
+                .find(|c| c.name == "respond")
+                .and_then(|c| serde_json::from_str::<serde_json::Value>(&c.arguments).ok())
+                .and_then(|v| v.get("text").and_then(|t| t.as_str()).map(String::from));
+            calls.retain(|c| c.name != "respond");
+
+            // If respond was the only call, treat as plain text reply.
+            if calls.is_empty() {
+                let text = respond_text.unwrap_or_default();
                 let _ = hooks::fire(
                     &state.nats,
                     "agent-end",
