@@ -1,0 +1,6 @@
+package mycelium:tool-regex@0.1.0;
+
+// Regex match / replace / extract over a string. Pure compute — no imports.
+world tool-regex {
+    export mycelium:tool/tool-provider@0.1.0;
+}

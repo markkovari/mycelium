@@ -1,0 +1,8 @@
+package mycelium:tool-shell@0.1.0;
+
+// Executes pre-approved shell commands. The runner validates the command
+// against its allow-list before invoking; this component never spawns
+// processes itself — the runner injects the result via the invoke return value.
+world tool-shell {
+    export mycelium:tool/tool-provider@0.1.0;
+}

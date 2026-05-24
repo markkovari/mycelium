@@ -1,0 +1,6 @@
+package mycelium:tool-yaml@0.1.0;
+
+// YAML <-> JSON conversion. Pure compute — no imports.
+world tool-yaml {
+    export mycelium:tool/tool-provider@0.1.0;
+}

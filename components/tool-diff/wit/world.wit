@@ -1,0 +1,6 @@
+package mycelium:tool-diff@0.1.0;
+
+// Produces a unified diff between two strings. Pure compute — no imports.
+world tool-diff {
+    export mycelium:tool/tool-provider@0.1.0;
+}

@@ -1,0 +1,13 @@
+package mycelium:tool-image-resize@0.1.0;
+
+// Resize / crop images; input and output are base64-encoded bytes.
+// HTTP import is optional — only needed if the component fetches a remote image URL.
+world tool-image-resize {
+    export mycelium:tool/tool-provider@0.1.0;
+
+    import wasi:http/outgoing-handler@0.2.2;
+    import wasi:http/types@0.2.2;
+    import wasi:io/streams@0.2.2;
+    import wasi:io/poll@0.2.2;
+    import wasi:io/error@0.2.2;
+}

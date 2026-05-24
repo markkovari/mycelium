@@ -1,0 +1,6 @@
+package mycelium:tool-json-path@0.1.0;
+
+// JSONPath / jq-style queries over a JSON string. Pure compute — no imports.
+world tool-json-path {
+    export mycelium:tool/tool-provider@0.1.0;
+}

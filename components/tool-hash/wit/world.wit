@@ -1,0 +1,6 @@
+package mycelium:tool-hash@0.1.0;
+
+// SHA-256 / MD5 / BLAKE3 hashing over string or bytes input. Pure compute — no imports.
+world tool-hash {
+    export mycelium:tool/tool-provider@0.1.0;
+}

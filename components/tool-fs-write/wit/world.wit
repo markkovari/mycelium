@@ -1,0 +1,12 @@
+package mycelium:tool-fs-write@0.1.0;
+
+// Writes / appends files within a preopened directory sandbox.
+// The runner preopens only the paths listed in the component's manifest.
+world tool-fs-write {
+    export mycelium:tool/tool-provider@0.1.0;
+
+    import wasi:filesystem/preopens@0.2.2;
+    import wasi:filesystem/types@0.2.2;
+    import wasi:io/streams@0.2.2;
+    import wasi:io/error@0.2.2;
+}

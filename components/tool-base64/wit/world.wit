@@ -1,0 +1,6 @@
+package mycelium:tool-base64@0.1.0;
+
+// Base64 encode / decode. Pure compute — no imports.
+world tool-base64 {
+    export mycelium:tool/tool-provider@0.1.0;
+}

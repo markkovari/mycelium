@@ -1,0 +1,6 @@
+package mycelium:tool-semver@0.1.0;
+
+// Parse, compare, and bump semver strings. Pure compute — no imports.
+world tool-semver {
+    export mycelium:tool/tool-provider@0.1.0;
+}

@@ -1,0 +1,9 @@
+package mycelium:tool-uuid@0.1.0;
+
+// Generates UUIDs (v4 random, v7 time-ordered).
+world tool-uuid {
+    export mycelium:tool/tool-provider@0.1.0;
+
+    import wasi:random/random@0.2.2;
+    import wasi:clocks/wall-clock@0.2.2;
+}

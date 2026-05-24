@@ -1,0 +1,11 @@
+package mycelium:tool-nats-publish@0.1.0;
+
+// Publishes a message to a NATS subject.
+// Requires a host-provided NATS capability import (TBD: wasmcloud:messaging or custom).
+// Uses wasmcloud:messaging/producer as a placeholder until the v2 host
+// stabilises its NATS-direct import interface.
+world tool-nats-publish {
+    export mycelium:tool/tool-provider@0.1.0;
+
+    import wasmcloud:messaging/producer@0.2.0;
+}

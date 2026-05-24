@@ -1,0 +1,6 @@
+package mycelium:tool-markdown@0.1.0;
+
+// Renders Markdown to plain text or HTML. Pure compute — no imports.
+world tool-markdown {
+    export mycelium:tool/tool-provider@0.1.0;
+}

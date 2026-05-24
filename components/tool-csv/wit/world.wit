@@ -1,0 +1,6 @@
+package mycelium:tool-csv@0.1.0;
+
+// Parse / query CSV; returns JSON rows. Pure compute — no imports.
+world tool-csv {
+    export mycelium:tool/tool-provider@0.1.0;
+}

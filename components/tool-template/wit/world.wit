@@ -1,0 +1,6 @@
+package mycelium:tool-template@0.1.0;
+
+// Handlebars / Tera template rendering. Pure compute — no imports.
+world tool-template {
+    export mycelium:tool/tool-provider@0.1.0;
+}
